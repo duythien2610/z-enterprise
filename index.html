@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Z-Enterprise Management Platform — Product Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top Persona & System Bar -->
+  <header class="persona-bar">
+    <div class="persona-brand">
+      <span class="brand-badge">FTEL • ISC</span>
+      <span class="brand-title">Z-Enterprise Platform</span>
+      <span class="brand-meta">Bản Quyền Doanh Nghiệp • Giao Diện Tác Nghiệp Phân Quyền v3.5</span>
+    </div>
+
+    <div class="persona-switcher">
+      <label for="select-persona" class="persona-label">Vai Trò (Role):</label>
+      <select id="select-persona" class="persona-select">
+        <option value="super_admin">Super Admin (Trụ Sở HQ FPT Telecom)</option>
+        <option value="region_admin">Region Admin (Ban Điều Hành Vùng Miền Nam)</option>
+        <option value="branch_admin" selected>Branch Admin (Trưởng Chi Nhánh HCM 01 - Tân Bình)</option>
+        <option value="sales_rep">Sales Representative (Chuyên Viên Kinh Doanh - Nguyễn Văn A)</option>
+        <option value="legal_audit">Legal & Internal Audit (Ban Pháp Chế & Kiểm Soát Nội Bộ)</option>
+      </select>
+      <div class="role-scope-indicator" id="role-scope-badge">
+        <!-- Dynamically rendered by app.js -->
+      </div>
+      <button class="btn-top-action" id="btn-toggle-filter" title="Bật/Tắt Bộ Lọc Nâng Cao">
+        Bộ Lọc Nâng Cao <span id="filter-indicator-dot" style="display:none; color:#fbbf24; font-size:9px;">●</span>
+      </button>
+      <div class="session-timeout-indicator" id="btn-session-timer" title="Thời gian phiên an toàn (Session Timeout) — Nhấn để Khóa Phiên ngay">
+        <span class="session-timer-dot"></span>
+        <span id="session-timer-text">29:45</span>
+      </div>
+      <button class="btn-reset-data" id="btn-reset-state" title="Khôi phục trạng thái dữ liệu mẫu ban đầu">
+        Đặt Lại Dữ Liệu
+      </button>
+    </div>
+  </header>
+
+  <!-- App Main Layout -->
+  <div class="app-container">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-profile">
+        <div class="avatar" id="profile-avatar">B1</div>
+        <div class="profile-info">
+          <div class="profile-name" id="profile-name">Lê Hoàng Nam</div>
+          <div class="profile-role" id="profile-role">Branch Admin (Chi Nhánh)</div>
+          <div class="profile-unit" id="profile-unit">Chi nhánh HCM01 - Tân Bình</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" id="sidebar-nav">
+        <!-- Rendered dynamically by app.js based on selected role -->
+      </nav>
+
+      <div class="sidebar-footer">
+        <div>Hệ Thống Z-Enterprise v3.5</div>
+        <div style="font-size: 10px; opacity: 0.8; margin-top: 2px;">Chuẩn FPT ISC Standard v1.0</div>
+      </div>
+    </aside>
+
+    <!-- Main Viewport -->
+    <main class="main-viewport">
+      <div class="content-header">
+        <div class="header-title-group">
+          <h1 id="header-title">Đang tải phân hệ...</h1>
+          <p id="header-desc">Hệ thống quản trị tài khoản Zalo Enterprise và vòng đời kênh bán hàng</p>
+        </div>
+        <div class="header-actions" id="header-actions">
+          <!-- Dynamic action buttons rendered per view -->
+        </div>
+      </div>
+
+      <!-- Advanced Filter Panel (Collapsible) -->
+      <div class="advanced-filter-panel" id="advanced-filter-panel" style="display: none;">
+        <div class="filter-panel-header">
+          <div class="filter-panel-title">
+            <span>Bộ Lọc Nâng Cao Hệ Thống (Multi-Criteria Filter)</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-close-filter" style="padding: 2px 8px;">Đóng</button>
+        </div>
+        <div class="filter-grid">
+          <div class="filter-group">
+            <label class="filter-label" for="filter-scope-unit">Phạm Vi / Đơn Vị:</label>
+            <select class="filter-control" id="filter-scope-unit">
+              <!-- Dynamically populated per role -->
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-status">Trạng Thái Nhân Sự / TK:</label>
+            <select class="filter-control" id="filter-status">
+              <option value="ALL">Tất cả trạng thái</option>
+              <option value="Active">Đang hoạt động (Active)</option>
+              <option value="Suspended">Đang tạm khóa (Suspended)</option>
+              <option value="Pending Activation">Chờ kích hoạt email</option>
+              <option value="Unassigned">Chưa gán tài khoản</option>
+              <option value="Leaving">Sắp thôi việc (Leaving)</option>
+              <option value="Terminated">Đã thôi việc (Terminated)</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-quota-health">Tình Trạng Hạn Ngạch:</label>
+            <select class="filter-control" id="filter-quota-health">
+              <option value="ALL">Tất cả mức hạn ngạch</option>
+              <option value="abundant">Dồi dào (> 10% Quota)</option>
+              <option value="warning">Cảnh báo sắp hết (<= 10%)</option>
+              <option value="zero">Hết hạn ngạch (Zero Quota)</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-time-range">Khoảng Thời Gian:</label>
+            <select class="filter-control" id="filter-time-range">
+              <option value="ALL">Toàn bộ thời gian</option>
+              <option value="24H">24 giờ qua</option>
+              <option value="7D">7 ngày qua</option>
+              <option value="30D">30 ngày qua</option>
+              <option value="QUARTER">Quý này</option>
+            </select>
+          </div>
+          <div class="filter-group" style="grid-column: span 2;">
+            <label class="filter-label" for="filter-keyword">Từ Khóa Tìm Kiếm:</label>
+            <input type="text" class="filter-control" id="filter-keyword" placeholder="Nhập tên nhân viên, email @fpt.com.vn, mã NV, tên khách hàng...">
+          </div>
+        </div>
+        <div class="filter-footer">
+          <div class="filter-active-summary" id="filter-active-summary">
+            <span>Tiêu chí: Chưa kích hoạt bộ lọc</span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary btn-sm" id="btn-reset-filter">Đặt Lại</button>
+            <button class="btn btn-primary btn-sm" id="btn-apply-filter">Áp Dụng Lọc</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="content-body" id="main-content-body">
+        <!-- Dynamic content rendered by app.js -->
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Generic Modal Component -->
+  <div class="modal-backdrop" id="modal-generic">
+    <div class="modal-container">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-generic-title">Tiêu Đề Thao Tác</div>
+        <button class="modal-close" aria-label="Đóng">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-generic-body">
+        <!-- Modal body content -->
+      </div>
+      <div class="modal-footer" id="modal-generic-footer">
+        <!-- Modal buttons -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
+
