@@ -828,17 +828,9 @@ function renderAccounts() {
     }
   }
 
-  // 2. Update Quick Status Tab Counts
-  document.getElementById('tab-count-all').innerText = metrics.total;
-  document.getElementById('tab-count-unassigned').innerText = metrics.unassigned;
-  document.getElementById('tab-count-active').innerText = metrics.active;
-  document.getElementById('tab-count-pending').innerText = metrics.pending;
-  document.getElementById('tab-count-locked').innerText = metrics.locked;
-  document.getElementById('tab-count-warning').innerText = metrics.attention;
-
   const tabUnassignedLabel = document.getElementById('tab-unassigned-label');
   if (tabUnassignedLabel) {
-    tabUnassignedLabel.innerText = isBranchAdmin ? 'Chưa gán' : 'Chưa phân bổ';
+    tabUnassignedLabel.innerText = isBranchAdmin ? 'Chưa gán (Khả dụng)' : 'Chưa gán (Khả dụng)';
   }
 
   // Toggle Role Toolbar Elements
@@ -869,16 +861,43 @@ function renderAccounts() {
     }
   });
 
-  // Filter accounts
-  let filtered = AppState.accounts.slice();
+  // Base filters (Role, Search, Region, Branch) - applied BEFORE Quick Tab metrics
+  let baseFiltered = AppState.accounts.slice();
 
-  // Role scope limitation
   if (AppState.currentRole === 'BRANCH_ADMIN') {
-    filtered = filtered.filter(a => a.branch === AppState.activeBranchScope);
+    baseFiltered = baseFiltered.filter(a => a.branch === AppState.activeBranchScope);
   }
 
-  // Quick tab filter
+  const s = AppState.accountFilters.search.toLowerCase().trim();
+  if (s) {
+    baseFiltered = baseFiltered.filter(a => 
+      a.id.toLowerCase().includes(s) ||
+      (a.ownerName && a.ownerName.toLowerCase().includes(s)) ||
+      (a.ownerEmail && a.ownerEmail.toLowerCase().includes(s)) ||
+      a.branch.toLowerCase().includes(s)
+    );
+  }
+
+  if (AppState.currentRole === 'SUPER_ADMIN' && AppState.accountFilters.region !== 'all') {
+    baseFiltered = baseFiltered.filter(a => a.region === AppState.accountFilters.region);
+  }
+
+  if (AppState.currentRole === 'SUPER_ADMIN' && AppState.accountFilters.branch !== 'all') {
+    baseFiltered = baseFiltered.filter(a => a.branch === AppState.accountFilters.branch);
+  }
+
+  // Update Quick Status Tab Counts based on baseFiltered!
+  document.getElementById('tab-count-all').innerText = baseFiltered.length;
+  document.getElementById('tab-count-unassigned').innerText = baseFiltered.filter(a => a.status === 'UNASSIGNED' || a.ownerName === null).length;
+  document.getElementById('tab-count-active').innerText = baseFiltered.filter(a => a.status === 'ACTIVE').length;
+  document.getElementById('tab-count-pending').innerText = baseFiltered.filter(a => a.status === 'PENDING').length;
+  document.getElementById('tab-count-locked').innerText = baseFiltered.filter(a => a.status === 'LOCKED').length;
+  document.getElementById('tab-count-warning').innerText = baseFiltered.filter(a => a.attention !== null).length;
+
+  // Final filtered list including Quick tab filter
+  let filtered = baseFiltered.slice();
   const curTab = AppState.accountFilters.status;
+  
   if (curTab === 'unassigned') {
     filtered = filtered.filter(a => a.status === 'UNASSIGNED' || a.ownerName === null);
     // Pin reclaimed accounts to top (CR-001)
@@ -891,27 +910,6 @@ function renderAccounts() {
     filtered = filtered.filter(a => a.status === 'LOCKED');
   } else if (curTab === 'warning') {
     filtered = filtered.filter(a => a.attention !== null);
-  }
-
-  // Search filter
-  const s = AppState.accountFilters.search.toLowerCase().trim();
-  if (s) {
-    filtered = filtered.filter(a => 
-      a.id.toLowerCase().includes(s) ||
-      (a.ownerName && a.ownerName.toLowerCase().includes(s)) ||
-      (a.ownerEmail && a.ownerEmail.toLowerCase().includes(s)) ||
-      a.branch.toLowerCase().includes(s)
-    );
-  }
-
-  // Region filter (for Super Admin)
-  if (AppState.currentRole === 'SUPER_ADMIN' && AppState.accountFilters.region !== 'all') {
-    filtered = filtered.filter(a => a.region === AppState.accountFilters.region);
-  }
-
-  // Branch filter (for Super Admin)
-  if (AppState.currentRole === 'SUPER_ADMIN' && AppState.accountFilters.branch !== 'all') {
-    filtered = filtered.filter(a => a.branch === AppState.accountFilters.branch);
   }
 
   // Render Table Rows
@@ -2820,3 +2818,4 @@ window.addEventListener('DOMContentLoaded', () => {
   // CR-001: Default landing page is Account Management ('accounts')
   switchView('accounts');
 });
+
