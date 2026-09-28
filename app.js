@@ -678,33 +678,32 @@ function renderAccounts() {
   // 1. Update Top KPI Overview Cards based on Role Scope
   const kpiTotalLabel = document.getElementById('acc-kpi-total-label');
   const kpiTotalSub = document.getElementById('acc-kpi-total-sub');
-  const kpiCentralLabel = document.getElementById('acc-kpi-central-label');
-  const kpiCentralSub = document.getElementById('acc-kpi-central-sub');
-  const kpiActiveLabel = document.getElementById('acc-kpi-active-label');
-  const kpiActiveSub = document.getElementById('acc-kpi-active-sub');
-
+  
   if (isBranchAdmin) {
-    if (kpiTotalLabel) kpiTotalLabel.innerText = 'Hạn ngạch chi nhánh';
+    if (kpiTotalLabel) kpiTotalLabel.innerText = 'Ngân sách chi nhánh';
     if (kpiTotalSub) kpiTotalSub.innerText = AppState.activeBranchScope;
-    if (kpiCentralLabel) kpiCentralLabel.innerText = 'Chưa gán (Khả dụng)';
-    if (kpiCentralSub) kpiCentralSub.innerText = 'Sẵn sàng gán';
-    if (kpiActiveLabel) kpiActiveLabel.innerText = 'Đang hoạt động';
-    if (kpiActiveSub) kpiActiveSub.innerText = 'Đã gán nhân viên';
   } else {
-    if (kpiTotalLabel) kpiTotalLabel.innerText = 'Tổng tài khoản';
-    if (kpiTotalSub) kpiTotalSub.innerText = 'Toàn doanh nghiệp';
-    if (kpiCentralLabel) kpiCentralLabel.innerText = 'Chưa phân bổ';
-    if (kpiCentralSub) kpiCentralSub.innerText = 'Kho trung tâm';
-    if (kpiActiveLabel) kpiActiveLabel.innerText = 'Đang hoạt động';
-    if (kpiActiveSub) kpiActiveSub.innerText = 'Đã gán nhân viên';
+    if (kpiTotalLabel) kpiTotalLabel.innerText = 'Tổng quota';
+    if (kpiTotalSub) kpiTotalSub.innerText = 'Ngân sách hệ thống';
   }
+
+  const totalCount = metrics.total || 1;
 
   const kpiTotal = document.getElementById('acc-kpi-total');
   if (kpiTotal) kpiTotal.innerText = metrics.total;
+
+  const kpiAllocated = document.getElementById('acc-kpi-allocated');
+  if (kpiAllocated) kpiAllocated.innerText = isBranchAdmin ? metrics.allocated : metrics.allocated;
+  const kpiAllocatedSub = document.getElementById('acc-kpi-allocated-sub');
+  if (kpiAllocatedSub) kpiAllocatedSub.innerText = isBranchAdmin ? 'Đã phân bổ về CN' : 'Chiếm ' + Math.round((metrics.allocated/totalCount)*100) + '% tổng quota';
+
   const kpiCentral = document.getElementById('acc-kpi-central');
-  if (kpiCentral) kpiCentral.innerText = metrics.unassigned;
-  const kpiActive = document.getElementById('acc-kpi-active');
-  if (kpiActive) kpiActive.innerText = metrics.active;
+  if (kpiCentral) kpiCentral.innerText = isBranchAdmin ? metrics.unassigned : metrics.centralPool;
+  const kpiCentralLabel = document.getElementById('acc-kpi-central-label');
+  if (kpiCentralLabel) kpiCentralLabel.innerText = isBranchAdmin ? 'Chưa gán' : 'Chưa phân bổ';
+  const kpiCentralSub = document.getElementById('acc-kpi-central-sub');
+  if (kpiCentralSub) kpiCentralSub.innerText = isBranchAdmin ? 'Sẵn sàng gán' : 'Chiếm ' + Math.round((metrics.centralPool/totalCount)*100) + '% tổng quota';
+
   const kpiPending = document.getElementById('acc-kpi-pending');
   if (kpiPending) kpiPending.innerText = metrics.pending;
   const kpiLocked = document.getElementById('acc-kpi-locked');
@@ -713,61 +712,30 @@ function renderAccounts() {
   // 1b. Update Gauge Bar (Visual Usage Ratio)
   const gaugeRatio = document.getElementById('acc-gauge-ratio');
   if (gaugeRatio) {
-    gaugeRatio.innerText = isBranchAdmin 
-      ? `${metrics.active} / ${metrics.total} tài khoản chi nhánh`
-      : `${metrics.active} / ${metrics.allocated} tài khoản cấp đơn vị`;
+    gaugeRatio.innerText = isBranchAdmin ? metrics.total + ' tài khoản chi nhánh' : metrics.total + ' tài khoản hệ thống';
   }
   const gaugePercent = document.getElementById('acc-gauge-percent');
-  if (gaugePercent) gaugePercent.innerText = `${metrics.utilizationRate}%`;
+  if (gaugePercent) gaugePercent.innerText = '100%';
 
   const barActive = document.getElementById('acc-gauge-bar-active');
-  const barPending = document.getElementById('acc-gauge-bar-pending');
   const barLocked = document.getElementById('acc-gauge-bar-locked');
-  const barBranchUnassigned = document.getElementById('acc-gauge-bar-branch-unassigned');
-  const barCentral = document.getElementById('acc-gauge-bar-central');
+  const barEmpty = document.getElementById('acc-gauge-bar-empty');
 
-  if (isBranchAdmin) {
-    const totalCount = metrics.total || 1;
-    if (barActive) barActive.style.width = `${(metrics.active / totalCount) * 100}%`;
-    if (barPending) barPending.style.width = `${(metrics.pending / totalCount) * 100}%`;
-    if (barLocked) barLocked.style.width = `${(metrics.locked / totalCount) * 100}%`;
-    if (barBranchUnassigned) barBranchUnassigned.style.width = `${(metrics.unassigned / totalCount) * 100}%`;
-    if (barCentral) barCentral.style.width = `0%`; // Hide central pool for branch admin
-  } else {
-    if (barActive) barActive.style.width = `${metrics.active}%`;
-    if (barPending) barPending.style.width = `${metrics.pending}%`;
-    if (barLocked) barLocked.style.width = `${metrics.locked}%`;
-    if (barBranchUnassigned) barBranchUnassigned.style.width = `${metrics.unassignedInBranch}%`;
-    if (barCentral) barCentral.style.width = `${metrics.centralPool}%`;
-  }
+  const activeCount = metrics.active + metrics.pending;
+  const lockedCount = metrics.locked;
+  const emptyCount = isBranchAdmin ? metrics.unassigned : (metrics.unassignedInBranch + metrics.centralPool);
+
+  if (barActive) barActive.style.width = (activeCount / totalCount) * 100 + '%';
+  if (barLocked) barLocked.style.width = (lockedCount / totalCount) * 100 + '%';
+  if (barEmpty) barEmpty.style.width = (emptyCount / totalCount) * 100 + '%';
 
   // Update Sublegend
   const subActive = document.getElementById('acc-sublegend-active');
-  if (subActive) subActive.innerText = metrics.active;
-  const subPending = document.getElementById('acc-sublegend-pending');
-  if (subPending) subPending.innerText = metrics.pending;
+  if (subActive) subActive.innerText = activeCount;
   const subLocked = document.getElementById('acc-sublegend-locked');
-  if (subLocked) subLocked.innerText = metrics.locked;
-  
-  const subBranchUnassigned = document.getElementById('acc-sublegend-branch-unassigned');
-  if (subBranchUnassigned) subBranchUnassigned.innerText = isBranchAdmin ? metrics.unassigned : metrics.unassignedInBranch;
-
-  const subFifthLabel = document.getElementById('acc-sublegend-fifth-label');
-  if (subFifthLabel) {
-    if (isBranchAdmin) {
-      subFifthLabel.parentElement.classList.remove('hidden'); // Ensure visible
-    }
-  }
-
-  const subFourthLabel = document.getElementById('acc-sublegend-fourth-label');
-  if (subFourthLabel) {
-    if (isBranchAdmin) {
-      subFourthLabel.parentElement.classList.add('hidden'); // Hide Kho trung tâm for branch admin
-    } else {
-      subFourthLabel.parentElement.classList.remove('hidden');
-      subFourthLabel.innerHTML = `Kho trung tâm: <strong id="acc-sublegend-central" class="text-slate-700">${metrics.centralPool}</strong>`;
-    }
-  }
+  if (subLocked) subLocked.innerText = lockedCount;
+  const subEmpty = document.getElementById('acc-sublegend-empty');
+  if (subEmpty) subEmpty.innerText = emptyCount;
 
   const subTotal = document.getElementById('acc-sublegend-total');
   if (subTotal) {
@@ -830,7 +798,7 @@ function renderAccounts() {
 
   const tabUnassignedLabel = document.getElementById('tab-unassigned-label');
   if (tabUnassignedLabel) {
-    tabUnassignedLabel.innerText = isBranchAdmin ? 'Chưa gán (Khả dụng)' : 'Chưa gán (Khả dụng)';
+    tabUnassignedLabel.innerText = isBranchAdmin ? 'Chưa phân bổ' : 'Chưa phân bổ';
   }
 
   // Toggle Role Toolbar Elements
@@ -1031,38 +999,15 @@ function renderAccounts() {
     `;
 
     tr.innerHTML = `
-      <td class="py-2.5 px-2 text-center w-8">
-        <input type="checkbox" class="acc-row-checkbox w-3.5 h-3.5 rounded border-slate-300 cursor-pointer accent-primary"
-          data-id="${acc.id}" onchange="toggleBulkSelect('${acc.id}', this.checked)"
-          ${AppState.selectedAccounts.has(acc.id) ? 'checked' : ''}>
-      </td>
-      <td class="py-2.5 px-3 font-semibold text-primary text-body-sm font-mono flex items-center gap-1.5">
-        <span>${acc.id}</span>
-        ${acc.isReclaimed ? '<span class="px-1 py-0.2 bg-red-100 text-red-700 text-[10px] rounded font-bold">Thu hồi</span>' : ''}
-      </td>
-      <td class="py-2.5 px-3 text-body-sm font-medium text-on-surface">
-        ${acc.ownerName 
-          ? `<div>${acc.displayName || acc.ownerName}</div>${acc.displayName && acc.displayName !== acc.ownerName ? `<div class="text-[10px] text-slate-400">(${acc.ownerName})</div>` : ''}` 
-          : (acc.isReclaimed && acc.formerOwner 
-              ? `<div class="text-slate-400 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span><span class="line-through-none">${acc.formerOwner.name}</span><span class="text-[10px] text-slate-400 bg-slate-100 px-1 py-0.2 rounded font-normal border border-slate-200">(Thu hồi - Cũ)</span></div>` 
-              : '<span class="text-slate-400 italic">Chưa gán</span>')}
-      </td>
-      <td class="py-2.5 px-3 text-body-xs text-on-surface-variant font-mono">
-        ${acc.ownerEmail 
-          ? acc.ownerEmail 
-          : (acc.isReclaimed && acc.formerOwner 
-              ? `<span class="text-slate-400 italic">${acc.formerOwner.email}</span>` 
-              : '<span class="text-slate-400">—</span>')}
-      </td>
-      <td class="py-2.5 px-3 text-body-xs text-on-surface-variant">
-        <div>${acc.branch}</div>
-        <div class="text-[10px] text-slate-400">${acc.region}</div>
-      </td>
-      <td class="py-2.5 px-3">${statusPill}</td>
-      <td class="py-2.5 px-3">${attentionCol}</td>
-      <td class="py-2 px-2 text-center">
-        <div class="inline-flex items-center gap-0.5 justify-center">
-          ${actionIcons}
+      <td class="py-2.5 px-3 font-semibold text-on-surface">${item.branchName}</td>
+      <td class="py-2.5 px-3 text-slate-500">${item.regionName}</td>
+      <td class="py-2.5 px-3 text-center font-bold text-primary">${item.quota}</td>
+      <td class="py-2.5 px-3 text-center text-amber-700 font-semibold">${item.unassigned}</td>
+      <td class="py-2.5 px-3 text-center">
+        <div class="inline-flex items-center gap-1 justify-center">
+          <input type="number" id="adjust-input-${item.branchName.replace(/\s+/g, '-')}" class="w-14 text-xs border border-outline-variant rounded p-1 text-center font-medium" placeholder="SL..." min="1" max="999">
+          <button class="px-2 py-1 rounded text-[11px] font-semibold border border-red-300 text-red-700 hover:bg-red-50 cursor-pointer active:scale-95" onclick="bulkReclaimBranchQuota('${item.branchName}')">Thu hồi</button>
+          <button class="px-2 py-1 rounded text-[11px] font-semibold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 cursor-pointer active:scale-95" onclick="bulkAllocateBranchQuota('${item.branchName}')">Cấp thêm</button>
         </div>
       </td>
     `;
@@ -1637,25 +1582,27 @@ function openAssignAccountModal(accountId = null) {
       alert('Không còn tài khoản khả dụng để gán! Vui lòng thu hồi tài khoản không dùng trước.');
       return;
     }
-    targetAccount = availableAccounts[0]; // Default to first available
+    
+    // Do not auto select target account
+    targetAccount = null;
 
     if (readonlyWrapAcc) readonlyWrapAcc.classList.add('hidden');
     if (selectWrapAcc) selectWrapAcc.classList.remove('hidden');
 
     // Populate Account ID select
     if (accSelect) {
-      accSelect.innerHTML = '';
+      accSelect.innerHTML = '<option value="">--- Chọn Account ID ---</option>';
       availableAccounts.forEach(a => {
         const opt = document.createElement('option');
         opt.value = a.id;
-        opt.innerText = `${a.id} (${a.branch})`;
+        opt.innerText = `${a.id} (${a.branch || 'Kho trung tâm'})`;
         accSelect.appendChild(opt);
       });
-      accSelect.value = targetAccount.id;
+      accSelect.value = '';
     }
   }
 
-  if (!targetAccount) {
+  if (accountId && !targetAccount) {
     alert('Không tìm thấy tài khoản để gán.');
     return;
   }
@@ -1664,11 +1611,11 @@ function openAssignAccountModal(accountId = null) {
 
   // Set Account ID in header (for readonly mode)
   const accIdEl = document.getElementById('modal-provision-acc-id');
-  if (accIdEl) accIdEl.innerText = targetAccount.id;
+  if (accIdEl) accIdEl.innerText = targetAccount ? targetAccount.id : '...';
 
   const poolTag = document.getElementById('modal-provision-pool-tag');
   if (poolTag) {
-    if (targetAccount.isReclaimed) {
+    if (targetAccount && targetAccount.isReclaimed) {
       poolTag.innerText = 'Đã thu hồi - Sẵn sàng gán';
       poolTag.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200';
     } else {
@@ -1688,15 +1635,39 @@ function openAssignAccountModal(accountId = null) {
 
 function onProvisionAccChanged(accId) {
   const target = AppState.accounts.find(a => a.id === accId);
-  if (target) {
-    gTargetAssignAccount = target;
-    renderProvisionBranchUI();
-    clearProvisionCombobox();
+  gTargetAssignAccount = target || null;
+  renderProvisionBranchUI();
+  clearProvisionCombobox();
+  
+  // Set Account ID in header (for readonly mode)
+  const accIdEl = document.getElementById('modal-provision-acc-id');
+  if (accIdEl) accIdEl.innerText = gTargetAssignAccount ? gTargetAssignAccount.id : '...';
+
+  const poolTag = document.getElementById('modal-provision-pool-tag');
+  if (poolTag) {
+    if (gTargetAssignAccount && gTargetAssignAccount.isReclaimed) {
+      poolTag.innerText = 'Đã thu hồi - Sẵn sàng gán';
+      poolTag.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200';
+    } else {
+      poolTag.innerText = 'Chưa phân bổ';
+      poolTag.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200';
+    }
   }
 }
 
 function renderProvisionBranchUI() {
-  if (!gTargetAssignAccount) return;
+  const readonlyWrap = document.getElementById('modal-provision-branch-readonly-wrap');
+  const selectWrap = document.getElementById('modal-provision-branch-select-wrap');
+  const branchLabel = document.getElementById('modal-provision-branch-label');
+  const branchReadonly = document.getElementById('modal-provision-branch-readonly');
+  const branchSelect = document.getElementById('modal-provision-branch-select');
+
+  if (!gTargetAssignAccount) {
+    if (readonlyWrap) readonlyWrap.classList.add('hidden');
+    if (selectWrap) selectWrap.classList.add('hidden');
+    return;
+  }
+  
   const targetAccount = gTargetAssignAccount;
   
   // Branch Handling
@@ -2819,3 +2790,91 @@ window.addEventListener('DOMContentLoaded', () => {
   switchView('accounts');
 });
 
+
+
+// Bulk adjustments from modal
+function bulkReclaimBranchQuota(branchName) {
+  const inputEl = document.getElementById('adjust-input-' + branchName.replace(/\s+/g, '-'));
+  if (!inputEl || !inputEl.value) {
+    alert('Vui lòng nhập số lượng cần thu hồi');
+    return;
+  }
+  const amount = parseInt(inputEl.value, 10);
+  if (isNaN(amount) || amount <= 0) {
+    alert('Số lượng không hợp lệ');
+    return;
+  }
+  
+  const bAccounts = AppState.accounts.filter(a => a.branch === branchName);
+  const bQuota = bAccounts.length;
+  const bAssigned = bAccounts.filter(a => a.ownerName !== null).length;
+  const bUnassigned = bQuota - bAssigned;
+  
+  if (amount > bUnassigned) {
+    alert(`Không thể thu hồi ${amount}. Quota nhàn rỗi chỉ còn ${bUnassigned}.`);
+    return;
+  }
+
+  let reclaimed = 0;
+  for (let i = AppState.accounts.length - 1; i >= 0 && reclaimed < amount; i--) {
+    const acc = AppState.accounts[i];
+    if (acc.branch === branchName && acc.ownerName === null) {
+      acc.branch = null;
+      acc.region = null;
+      reclaimed++;
+    }
+  }
+
+  inputEl.value = '';
+  const regFilter = document.getElementById('qm-region-filter').value;
+  filterQuotaManageTable(regFilter);
+  renderQuotas();
+  renderAccounts();
+  updateTopLeftNavigation();
+}
+
+function bulkAllocateBranchQuota(branchName) {
+  const inputEl = document.getElementById('adjust-input-' + branchName.replace(/\s+/g, '-'));
+  if (!inputEl || !inputEl.value) {
+    alert('Vui lòng nhập số lượng cần cấp thêm');
+    return;
+  }
+  const amount = parseInt(inputEl.value, 10);
+  if (isNaN(amount) || amount <= 0) {
+    alert('Số lượng không hợp lệ');
+    return;
+  }
+
+  const metrics = getMetrics();
+  if (amount > metrics.centralPool) {
+    alert(`Không thể cấp thêm ${amount}. Kho trung tâm chỉ còn ${metrics.centralPool}.`);
+    return;
+  }
+
+  let regionName = null;
+  for (const r of AppState.regions) {
+    if (r.branches.some(b => b.name === branchName)) {
+      regionName = r.name;
+      break;
+    }
+  }
+
+  if (!regionName) return;
+
+  let allocated = 0;
+  for (let i = 0; i < AppState.accounts.length && allocated < amount; i++) {
+    const acc = AppState.accounts[i];
+    if (acc.branch === null && acc.region === null) {
+      acc.branch = branchName;
+      acc.region = regionName;
+      allocated++;
+    }
+  }
+
+  inputEl.value = '';
+  const regFilter = document.getElementById('qm-region-filter').value;
+  filterQuotaManageTable(regFilter);
+  renderQuotas();
+  renderAccounts();
+  updateTopLeftNavigation();
+}
