@@ -226,17 +226,19 @@
                 <span id="acc-gauge-percent" class="text-xs font-bold text-primary px-2 py-0.5 rounded bg-primary/10">100%</span>
               </div>
 
-              <!-- Thanh nộ visual multi-segment bar -->
+              <!-- Thanh nộ visual multi-segment bar (100% khớp các Tabs) -->
               <div class="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden flex shadow-inner">
-                <div id="acc-gauge-bar-active" class="h-full bg-emerald-500 transition-all duration-300" style="width: 63%;" title="Đang hoạt động: 63"></div>
-                <div id="acc-gauge-bar-empty" class="h-full bg-sky-400 transition-all duration-300" style="width: 34%;" title="Còn trống: 34"></div>
-                <div id="acc-gauge-bar-locked" class="h-full bg-amber-400 transition-all duration-300" style="width: 3%;" title="Tạm khóa: 3"></div>
+                <div id="acc-gauge-bar-active" class="h-full bg-emerald-500 transition-all duration-300" style="width: 60%;" title="Đang hoạt động: 60"></div>
+                <div id="acc-gauge-bar-pending" class="h-full bg-amber-400 transition-all duration-300" style="width: 3%;" title="Chờ kích hoạt: 3"></div>
+                <div id="acc-gauge-bar-locked" class="h-full bg-slate-400 transition-all duration-300" style="width: 3%;" title="Tạm khóa: 3"></div>
+                <div id="acc-gauge-bar-empty" class="h-full bg-sky-400 transition-all duration-300" style="width: 34%;" title="Chưa phân bổ: 34"></div>
               </div>
 
               <div id="acc-gauge-sublegend" class="flex items-center justify-between text-[11px] text-slate-500 mt-1.5 pt-1 border-t border-outline-variant/30 flex-wrap gap-2">
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> <span>Đang hoạt động: <strong id="acc-sublegend-active" class="text-emerald-700">63</strong></span></div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-400"></span> <span>Còn trống: <strong id="acc-sublegend-empty" class="text-sky-700">34</strong></span></div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span> <span>Tạm khóa: <strong id="acc-sublegend-locked" class="text-amber-700">3</strong></span></div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> <span>Đang hoạt động: <strong id="acc-sublegend-active" class="text-emerald-700">60</strong></span></div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span> <span>Chờ kích hoạt: <strong id="acc-sublegend-pending" class="text-amber-700">3</strong></span></div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-400"></span> <span>Tạm khóa: <strong id="acc-sublegend-locked" class="text-slate-700">3</strong></span></div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-400"></span> <span>Chưa phân bổ: <strong id="acc-sublegend-empty" class="text-sky-700">34</strong></span></div>
                 <span id="acc-sublegend-total" class="text-slate-400 font-mono">Tổng: 100</span>
               </div>
             </div>

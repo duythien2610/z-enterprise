@@ -695,21 +695,21 @@ function renderAccounts() {
   const kpiAllocated = document.getElementById('acc-kpi-allocated');
   if (kpiAllocated) kpiAllocated.innerText = isBranchAdmin ? metrics.allocated : metrics.allocated;
   const kpiAllocatedSub = document.getElementById('acc-kpi-allocated-sub');
-  if (kpiAllocatedSub) kpiAllocatedSub.innerText = isBranchAdmin ? 'Đã phân bổ về CN' : 'Chiếm ' + Math.round((metrics.allocated/totalCount)*100) + '% tổng quota';
+  if (kpiAllocatedSub) kpiAllocatedSub.innerText = isBranchAdmin ? 'Đã phân bổ về CN' : 'Cấp 14 chi nhánh (70%)';
 
   const kpiCentral = document.getElementById('acc-kpi-central');
   if (kpiCentral) kpiCentral.innerText = isBranchAdmin ? metrics.unassigned : metrics.centralPool;
   const kpiCentralLabel = document.getElementById('acc-kpi-central-label');
   if (kpiCentralLabel) kpiCentralLabel.innerText = isBranchAdmin ? 'Chưa gán' : 'Chưa phân bổ';
   const kpiCentralSub = document.getElementById('acc-kpi-central-sub');
-  if (kpiCentralSub) kpiCentralSub.innerText = isBranchAdmin ? 'Sẵn sàng gán' : 'Chiếm ' + Math.round((metrics.centralPool/totalCount)*100) + '% tổng quota';
+  if (kpiCentralSub) kpiCentralSub.innerText = isBranchAdmin ? 'Sẵn sàng gán' : 'Kho trung tâm (30%)';
 
   const kpiPending = document.getElementById('acc-kpi-pending');
   if (kpiPending) kpiPending.innerText = metrics.pending;
   const kpiLocked = document.getElementById('acc-kpi-locked');
   if (kpiLocked) kpiLocked.innerText = metrics.locked;
 
-  // 1b. Update Gauge Bar (Visual Usage Ratio)
+  // 1b. Update Gauge Bar (Visual Usage Ratio - 100% Khớp Tabs)
   const gaugeRatio = document.getElementById('acc-gauge-ratio');
   if (gaugeRatio) {
     gaugeRatio.innerText = isBranchAdmin ? metrics.total + ' tài khoản chi nhánh' : metrics.total + ' tài khoản hệ thống';
@@ -718,20 +718,25 @@ function renderAccounts() {
   if (gaugePercent) gaugePercent.innerText = '100%';
 
   const barActive = document.getElementById('acc-gauge-bar-active');
+  const barPending = document.getElementById('acc-gauge-bar-pending');
   const barLocked = document.getElementById('acc-gauge-bar-locked');
   const barEmpty = document.getElementById('acc-gauge-bar-empty');
 
-  const activeCount = metrics.active + metrics.pending;
+  const activeCount = metrics.active;
+  const pendingCount = metrics.pending;
   const lockedCount = metrics.locked;
   const emptyCount = isBranchAdmin ? metrics.unassigned : (metrics.unassignedInBranch + metrics.centralPool);
 
   if (barActive) barActive.style.width = (activeCount / totalCount) * 100 + '%';
+  if (barPending) barPending.style.width = (pendingCount / totalCount) * 100 + '%';
   if (barLocked) barLocked.style.width = (lockedCount / totalCount) * 100 + '%';
   if (barEmpty) barEmpty.style.width = (emptyCount / totalCount) * 100 + '%';
 
   // Update Sublegend
   const subActive = document.getElementById('acc-sublegend-active');
   if (subActive) subActive.innerText = activeCount;
+  const subPending = document.getElementById('acc-sublegend-pending');
+  if (subPending) subPending.innerText = pendingCount;
   const subLocked = document.getElementById('acc-sublegend-locked');
   if (subLocked) subLocked.innerText = lockedCount;
   const subEmpty = document.getElementById('acc-sublegend-empty');
@@ -999,15 +1004,38 @@ function renderAccounts() {
     `;
 
     tr.innerHTML = `
-      <td class="py-2.5 px-3 font-semibold text-on-surface">${item.branchName}</td>
-      <td class="py-2.5 px-3 text-slate-500">${item.regionName}</td>
-      <td class="py-2.5 px-3 text-center font-bold text-primary">${item.quota}</td>
-      <td class="py-2.5 px-3 text-center text-amber-700 font-semibold">${item.unassigned}</td>
-      <td class="py-2.5 px-3 text-center">
-        <div class="inline-flex items-center gap-1 justify-center">
-          <input type="number" id="adjust-input-${item.branchName.replace(/\s+/g, '-')}" class="w-14 text-xs border border-outline-variant rounded p-1 text-center font-medium" placeholder="SL..." min="1" max="999">
-          <button class="px-2 py-1 rounded text-[11px] font-semibold border border-red-300 text-red-700 hover:bg-red-50 cursor-pointer active:scale-95" onclick="bulkReclaimBranchQuota('${item.branchName}')">Thu hồi</button>
-          <button class="px-2 py-1 rounded text-[11px] font-semibold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 cursor-pointer active:scale-95" onclick="bulkAllocateBranchQuota('${item.branchName}')">Cấp thêm</button>
+      <td class="py-2.5 px-2 text-center w-8">
+        <input type="checkbox" class="acc-row-checkbox w-3.5 h-3.5 rounded border-slate-300 cursor-pointer accent-primary"
+          data-id="${acc.id}" onchange="toggleBulkSelect('${acc.id}', this.checked)"
+          ${AppState.selectedAccounts.has(acc.id) ? 'checked' : ''}>
+      </td>
+      <td class="py-2.5 px-3 font-semibold text-primary text-body-sm font-mono flex items-center gap-1.5">
+        <span>${acc.id}</span>
+        ${acc.isReclaimed ? '<span class="px-1 py-0.2 bg-red-100 text-red-700 text-[10px] rounded font-bold">Thu hồi</span>' : ''}
+      </td>
+      <td class="py-2.5 px-3 text-body-sm font-medium text-on-surface">
+        ${acc.ownerName 
+          ? `<div>${acc.displayName || acc.ownerName}</div>${acc.displayName && acc.displayName !== acc.ownerName ? `<div class="text-[10px] text-slate-400">(${acc.ownerName})</div>` : ''}` 
+          : (acc.isReclaimed && acc.formerOwner 
+              ? `<div class="text-slate-400 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span><span class="line-through-none">${acc.formerOwner.name}</span><span class="text-[10px] text-slate-400 bg-slate-100 px-1 py-0.2 rounded font-normal border border-slate-200">(Thu hồi - Cũ)</span></div>` 
+              : '<span class="text-slate-400 italic">Chưa gán</span>')}
+      </td>
+      <td class="py-2.5 px-3 text-body-xs text-on-surface-variant font-mono">
+        ${acc.ownerEmail 
+          ? acc.ownerEmail 
+          : (acc.isReclaimed && acc.formerOwner 
+              ? `<span class="text-slate-400 italic">${acc.formerOwner.email}</span>` 
+              : '<span class="text-slate-400">—</span>')}
+      </td>
+      <td class="py-2.5 px-3 text-body-xs text-on-surface-variant">
+        <div>${acc.branch}</div>
+        <div class="text-[10px] text-slate-400">${acc.region}</div>
+      </td>
+      <td class="py-2.5 px-3">${statusPill}</td>
+      <td class="py-2.5 px-3">${attentionCol}</td>
+      <td class="py-2 px-2 text-center">
+        <div class="inline-flex items-center gap-0.5 justify-center">
+          ${actionIcons}
         </div>
       </td>
     `;
@@ -2472,15 +2500,15 @@ function filterQuotaManageTable(regionFilter) {
       <td class="py-2.5 px-3 font-semibold text-on-surface">${item.branchName}</td>
       <td class="py-2.5 px-3 text-slate-500">${item.regionName}</td>
       <td class="py-2.5 px-3 text-center font-bold text-primary">${item.quota}</td>
-      <td class="py-2.5 px-3 text-center text-emerald-700 font-semibold">${item.assigned}</td>
       <td class="py-2.5 px-3 text-center text-amber-700 font-semibold">${item.unassigned}</td>
       <td class="py-2.5 px-3 text-center">
-        <div class="inline-flex items-center gap-1.5 justify-center">
-          <button class="px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-0.5 transition-all ${canReclaim ? 'border-red-300 text-red-700 hover:bg-red-50 cursor-pointer active:scale-95' : 'border-slate-200 text-slate-300 cursor-not-allowed opacity-50'}" ${!canReclaim ? 'disabled title="Không có quota chưa gán để thu hồi"' : ''} onclick="quickReclaimBranchQuota('${item.branchName}')">
-            <span class="material-symbols-outlined text-[12px]">remove</span> Thu hồi
+        <div class="inline-flex items-center gap-1 justify-center">
+          <input type="number" id="adjust-input-${item.branchName.replace(/\s+/g, '-')}" class="w-14 text-xs border border-outline-variant rounded p-1 text-center font-medium" placeholder="SL..." min="1" max="999">
+          <button class="px-2 py-1 rounded text-[11px] font-semibold border flex items-center gap-0.5 transition-all ${canReclaim ? 'border-red-300 text-red-700 hover:bg-red-50 cursor-pointer active:scale-95' : 'border-slate-200 text-slate-300 cursor-not-allowed opacity-50'}" ${!canReclaim ? 'disabled title="Không có quota nhàn rỗi để thu hồi"' : ''} onclick="bulkReclaimBranchQuota('${item.branchName}')">
+            Thu hồi
           </button>
-          <button class="px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-0.5 transition-all ${canAllocate ? 'border-emerald-300 text-emerald-700 hover:bg-emerald-50 cursor-pointer active:scale-95' : 'border-slate-200 text-slate-300 cursor-not-allowed opacity-50'}" ${!canAllocate ? 'disabled title="Kho trung tâm đã hết quota khả dụng"' : ''} onclick="quickAllocateBranchQuota('${item.branchName}')">
-            <span class="material-symbols-outlined text-[12px]">add</span> Cấp thêm
+          <button class="px-2 py-1 rounded text-[11px] font-semibold border flex items-center gap-0.5 transition-all ${canAllocate ? 'border-emerald-300 text-emerald-700 hover:bg-emerald-50 cursor-pointer active:scale-95' : 'border-slate-200 text-slate-300 cursor-not-allowed opacity-50'}" ${!canAllocate ? 'disabled title="Kho trung tâm đã hết quota khả dụng"' : ''} onclick="bulkAllocateBranchQuota('${item.branchName}')">
+            Cấp thêm
           </button>
         </div>
       </td>
