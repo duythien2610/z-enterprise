@@ -1672,11 +1672,6 @@ function renderProvisionBranchUI() {
   
   // Branch Handling
   const isFromCentralPool = targetAccount.branch === 'Kho trung tâm';
-  const readonlyWrap = document.getElementById('modal-provision-branch-readonly-wrap');
-  const selectWrap = document.getElementById('modal-provision-branch-select-wrap');
-  const branchLabel = document.getElementById('modal-provision-branch-label');
-  const branchReadonly = document.getElementById('modal-provision-branch-readonly');
-  const branchSelect = document.getElementById('modal-provision-branch-select');
 
   if (isFromCentralPool && AppState.currentRole === 'SUPER_ADMIN') {
     if (branchLabel) branchLabel.innerText = 'Chi nhánh nhận tài khoản';
