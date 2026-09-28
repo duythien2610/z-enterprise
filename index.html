@@ -271,40 +271,6 @@
           </div>
         </div>
 
-        <!-- Quick Status Tabs Bar -->
-        <div class="bg-surface-container-lowest border border-outline-variant/60 rounded-lg p-1.5 flex items-center gap-1 overflow-x-auto select-none">
-          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-primary text-primary font-semibold flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="all">
-            <span>Tất cả</span>
-            <span id="tab-count-all" class="px-1.5 py-0.2 rounded-full bg-surface-container-high text-[11px] font-bold">100</span>
-          </button>
-
-          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="unassigned">
-            <span id="tab-unassigned-label">Chưa gán (Khả dụng)</span>
-            <span id="tab-count-unassigned" class="px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-700 text-[11px] font-bold">34</span>
-          </button>
-
-          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="active">
-            <span>Đang hoạt động</span>
-            <span id="tab-count-active" class="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">60</span>
-          </button>
-
-          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="pending">
-            <span>Chờ kích hoạt</span>
-            <span id="tab-count-pending" class="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">3</span>
-          </button>
-
-          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="locked">
-            <span>Tạm khóa</span>
-            <span id="tab-count-locked" class="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800 text-[11px] font-bold">3</span>
-          </button>
-
-          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-amber-800 hover:text-amber-900 flex items-center gap-1.5 cursor-pointer shrink-0 ml-auto bg-amber-50" data-filter="warning">
-            <span class="material-symbols-outlined text-[16px] text-amber-600">warning</span>
-            <span>Cần chú ý</span>
-            <span id="tab-count-warning" class="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 text-[11px] font-bold">8</span>
-          </button>
-        </div>
-
         <!-- Filter & Search Toolbar -->
         <div class="bg-surface-container-lowest border border-outline-variant/60 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-2 flex-1 min-w-[300px]">
@@ -356,6 +322,40 @@
               Hiển thị: <strong id="acc-visible-count" class="text-on-surface">100 tài khoản</strong>
             </div>
           </div>
+        </div>
+
+        <!-- Quick Status Tabs Bar -->
+        <div class="bg-surface-container-lowest border border-outline-variant/60 rounded-lg p-1.5 flex items-center gap-1 overflow-x-auto select-none">
+          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-primary text-primary font-semibold flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="all">
+            <span>Tất cả</span>
+            <span id="tab-count-all" class="px-1.5 py-0.2 rounded-full bg-surface-container-high text-[11px] font-bold">100</span>
+          </button>
+
+          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="unassigned">
+            <span id="tab-unassigned-label">Chưa gán (Khả dụng)</span>
+            <span id="tab-count-unassigned" class="px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-700 text-[11px] font-bold">34</span>
+          </button>
+
+          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="active">
+            <span>Đang hoạt động</span>
+            <span id="tab-count-active" class="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">60</span>
+          </button>
+
+          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="pending">
+            <span>Chờ kích hoạt</span>
+            <span id="tab-count-pending" class="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">3</span>
+          </button>
+
+          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-on-surface-variant hover:text-on-surface flex items-center gap-1.5 cursor-pointer shrink-0" data-filter="locked">
+            <span>Tạm khóa</span>
+            <span id="tab-count-locked" class="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800 text-[11px] font-bold">3</span>
+          </button>
+
+          <button class="acc-tab-btn px-3 py-1.5 text-xs rounded border-b-2 border-transparent text-amber-800 hover:text-amber-900 flex items-center gap-1.5 cursor-pointer shrink-0 ml-auto bg-amber-50" data-filter="warning">
+            <span class="material-symbols-outlined text-[16px] text-amber-600">warning</span>
+            <span>Cần chú ý</span>
+            <span id="tab-count-warning" class="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 text-[11px] font-bold">8</span>
+          </button>
         </div>
 
         <!-- Bulk Action Floating Bar (hidden until selection) -->
