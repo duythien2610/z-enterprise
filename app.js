@@ -1,4440 +1,2822 @@
-/**
- * Z Enterprise Management Platform — Admin Console Logic
- * 
- * Thống nhất chuẩn nghiệp vụ & UI/UX theo Clarification Harness (D-013 đến D-020):
- * 1. 1 Zalo Enterprise Account = 1 Quota.
- * 2. Tổng Quota = Đang sử dụng + Chưa sử dụng.
- * 3. Đang sử dụng = Đang hoạt động + Tạm khóa.
- * 4. Đã loại bỏ hoàn toàn 'Chờ kích hoạt' (Pending Activation). Cấp là Active ngay.
- * 5. Cấp Account: Ưu tiên gợi ý tái cấp Account đã thu hồi có leads trước để bảo toàn liên lạc.
- * 6. Bàn giao an toàn: Bắt buộc Mở khóa trước khi Bàn giao. Người cũ thành 'Đã bàn giao'.
- * 7. 3 Màn hình: Tổng quan, Quota (Nhân viên & Tài khoản), Nhật ký audit.
- * 8. Side Drawer trượt từ cạnh phải xem chi tiết và thao tác nhanh.
- * 9. Thuần Việt doanh nghiệp, loại bỏ hoàn toàn từ 'hạn ngạch'.
- */
 
-(function () {
-  'use strict';
+// ── Modal & Dropdown UI Helpers ──
+function closeModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.add('hidden');
+}
 
-  const STORAGE_KEY = 'z_enterprise_clean_v8_3_state';
+function toggleElement(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+}
 
-  // =========================================================================
-  // 1. DỮ LIỆU BAN ĐẦU & STATE CHUẨN HÓA
-  // =========================================================================
-  const INITIAL_STATE = {
-    currentPersona: 'super_admin', // 'super_admin' | 'branch_admin'
-    activeView: 'overview',        // 'overview' | 'quota' | 'audit_log'
+// SOP Zalo Enterprise - Interactive BA Prototype
+// Authoritative State Store & Deterministic Business Logic
 
-    // Bộ lọc màn hình Tổng quan
-    overviewFilters: {
-      search: '',
-      region: 'ALL'
-    },
-
-    // Bộ lọc màn hình Phân bổ Quota (Unified Table + Advanced Filters)
-    allocationFilters: {
-      search: '',
-      region: 'ALL',              // 'ALL' | 'South' | 'Central' | 'North'
-      utilizationStatus: 'ALL'    // 'ALL' | 'DANGER' (>=90%) | 'WARN' (80-89%) | 'GOOD' (<80%) | 'HIGH_FREE' (>=10)
-    },
-
-    // Bộ lọc màn hình Quota & Tài khoản
-    quotaFilters: {
-      search: '',
-      region: 'ALL',
-      branch: 'ALL',
-      activeTab: 'ALL', // 'ALL' | 'UNASSIGNED_POOL' | 'ACTIVE' | 'PENDING' | 'SUSPENDED' | 'ATTENTION'
-      advancedOpen: false,
-      advAccountStatus: 'ALL', // 'ALL' | 'Active' | 'Pending' | 'Suspended' | 'Unassigned'
-      advAttentionType: 'ALL'  // 'ALL' | 'OVERDUE' | 'TERMINATED' | 'INACTIVE30'
-    },
-
-    // Bộ lọc màn hình Nhật ký audit
-    auditFilters: {
-      search: ''
-    },
-
-    // ID nhân sự/account đang mở Side Drawer
-    selectedDrawerId: null,
-
-    // Lựa chọn thao tác hàng loạt (Bulk actions)
-    selectedBulkIds: [],
-
-    // Phân trang danh sách Quota
-    quotaPagination: {
-      page: 1,
-      pageSize: 10
-    },
-
-    // Cây tổ chức doanh nghiệp (Tổng hợp đồng: 1,200 Quota; Đã cấp chi nhánh: 1,100; Quỹ dự phòng: 100)
-    orgTree: {
-      totalCompanyQuota: 1200,
-      regions: [
-        {
-          id: 'South',
-          name: 'Miền Nam',
-          branches: [
-            { id: 'HCM-01', name: 'Hồ Chí Minh 01', totalQuota: 150, baseActive: 130, basePending: 4, baseSuspended: 4, baseAttention: 3 },
-            { id: 'HCM-02', name: 'Hồ Chí Minh 02', totalQuota: 120, baseActive: 87, basePending: 1, baseSuspended: 6, baseAttention: 1 },
-            { id: 'DNG-01', name: 'Đồng Nai 01', totalQuota: 90, baseActive: 65, basePending: 1, baseSuspended: 2, baseAttention: 2 },
-            { id: 'OTHER-SOUTH', name: 'Các chi nhánh Miền Nam khác', totalQuota: 220, baseActive: 206, basePending: 2, baseSuspended: 10, baseAttention: 4 }
-          ]
-        },
-        {
-          id: 'Central',
-          name: 'Miền Trung',
-          branches: [
-            { id: 'DAD-01', name: 'Đà Nẵng 01', totalQuota: 80, baseActive: 58, basePending: 1, baseSuspended: 2, baseAttention: 2 },
-            { id: 'HUE-01', name: 'Huế 01', totalQuota: 60, baseActive: 46, basePending: 1, baseSuspended: 1, baseAttention: 1 },
-            { id: 'OTHER-CENTRAL', name: 'Các chi nhánh Miền Trung khác', totalQuota: 90, baseActive: 67, basePending: 1, baseSuspended: 2, baseAttention: 1 }
-          ]
-        },
-        {
-          id: 'North',
-          name: 'Miền Bắc',
-          branches: [
-            { id: 'HAN-01', name: 'Hà Nội 01', totalQuota: 160, baseActive: 140, basePending: 3, baseSuspended: 8, baseAttention: 5 },
-            { id: 'HPG-01', name: 'Hải Phòng 01', totalQuota: 70, baseActive: 61, basePending: 1, baseSuspended: 2, baseAttention: 1 },
-            { id: 'OTHER-NORTH', name: 'Các chi nhánh Miền Bắc khác', totalQuota: 60, baseActive: 52, basePending: 1, baseSuspended: 1, baseAttention: 1 }
-          ]
-        }
+const AppState = {
+  selectedAccounts: new Set(), // IDs of bulk-selected accounts
+  currentRole: 'SUPER_ADMIN', // 'SUPER_ADMIN' | 'BRANCH_ADMIN'
+  activeBranchScope: 'Chi nhánh Ba Đình', // For BRANCH_ADMIN
+  activeRegionScope: 'Vùng 1 - Hà Nội',
+  currentView: 'overview', // 'overview' | 'accounts' | 'quotas' | 'audit'
+  lastSyncTime: '25/09/2026 • 08:35',
+  
+  // 7 Vùng & Chi nhánh
+  regions: [
+    {
+      id: 'V1',
+      name: 'Vùng 1 - Hà Nội',
+      quota: 16,
+      branches: [
+        { id: 'B101', name: 'Chi nhánh Ba Đình', quota: 8, assigned: 7, unassigned: 1 },
+        { id: 'B102', name: 'Chi nhánh Cầu Giấy', quota: 8, assigned: 7, unassigned: 1 }
       ]
     },
-
-    // Kho tài khoản đã thu hồi (Bảo tồn Leads khách hàng để ưu tiên tái cấp)
-    revokedAccounts: [
-      {
-        accountId: 'ZENT-001089',
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        revokedAt: '18/09/2026',
-        previousOwnerName: 'Nguyễn Thành Nam',
-        previousOwnerEmail: 'namnt@fpt.com.vn',
-        leadCount: 48,
-        note: 'Có 48 leads khách hàng SME đang trao đổi, cần ưu tiên tái cấp'
-      },
-      {
-        accountId: 'ZENT-001052',
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        revokedAt: '15/09/2026',
-        previousOwnerName: 'Lê Quang Khải',
-        previousOwnerEmail: 'khailq@fpt.com.vn',
-        leadCount: 72,
-        note: 'Có 72 khách hàng Internet Doanh nghiệp cần tiếp quản gấp'
-      },
-      {
-        accountId: 'ZENT-002104',
-        branchId: 'HAN-01',
-        branchName: 'Hà Nội 01',
-        region: 'North',
-        revokedAt: '19/09/2026',
-        previousOwnerName: 'Vũ Thị Lan',
-        previousOwnerEmail: 'lanvt@fpt.com.vn',
-        leadCount: 35,
-        note: 'Có 35 leads dự án Camera Cloud đang chờ tái cấp'
-      }
-    ],
-
-    // Danh sách nhân sự đại diện đầy đủ 3 miền và phản ánh các case cảnh báo
-    employees: [
-      // HCM-01
-      {
-        id: 'EMP-00128',
-        name: 'Nguyễn Văn A',
-        code: 'NV1088',
-        email: 'anv@fpt.com.vn',
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: 'ZENT-001293',
-        zaloAssignedDate: '15/08/2026',
-        accountStatus: 'Active', // 'Active' | 'Suspended' | 'Unassigned' | 'HandedOver'
-        employeeStatus: 'Active', // 'Active' | 'Terminated'
-        leadCount: 48,
-        attentionReason: null,
-        lastActiveDate: '25/09/2026'
-      },
-      {
-        id: 'EMP-00129',
-        name: 'Trần Thị B',
-        code: 'NV1092',
-        email: 'btt@fpt.com.vn',
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: 'ZENT-001294',
-        zaloAssignedDate: '20/07/2026',
-        accountStatus: 'Active',
-        employeeStatus: 'Active',
-        leadCount: 65,
-        attentionReason: null,
-        lastActiveDate: '24/09/2026'
-      },
-      {
-        id: 'EMP-00130',
-        name: 'Lê Văn C',
-        code: 'NV1104',
-        email: 'clv@fpt.com.vn',
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: 'ZENT-001295',
-        zaloAssignedDate: '10/06/2026',
-        accountStatus: 'Suspended',
-        employeeStatus: 'Active',
-        leadCount: 32,
-        attentionReason: 'Tài khoản đang tạm khóa do vi phạm chính sách giao tiếp',
-        lastActiveDate: '14/09/2026'
-      },
-      {
-        id: 'EMP-00131',
-        name: 'Phạm Văn D',
-        code: 'NV1120',
-        email: 'dpv@fpt.com.vn',
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: 'ZENT-001296',
-        zaloAssignedDate: '01/05/2026',
-        accountStatus: 'Active',
-        employeeStatus: 'Terminated', // Đã nghỉ việc
-        leadCount: 127,
-        attentionReason: 'Nhân sự đã nghỉ việc nhưng tài khoản Zalo vẫn mở (Nguy cơ rò rỉ dữ liệu)',
-        lastActiveDate: '20/09/2026'
-      },
-      {
-        id: 'EMP-00132',
-        name: 'Hoàng Quốc E',
-        code: 'NV1135',
-        email: 'ehq@fpt.com.vn',
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: 'ZENT-001297',
-        zaloAssignedDate: '23/09/2026',
-        pendingAssignedAt: '23/09/2026 09:30',
-        pendingHours: 52,
-        pendingOverdue: true,
-        accountStatus: 'Pending',
-        employeeStatus: 'Active',
-        leadCount: 15,
-        attentionReason: 'Chờ kích hoạt quá hạn (52h chưa đăng nhập)',
-        lastActiveDate: null
-      },
-      {
-        id: 'EMP-00133',
-        name: 'Đặng Ngọc F',
-        code: 'NV1142',
-        email: null,
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: null,
-        zaloAssignedDate: null,
-        accountStatus: 'Unassigned',
-        employeeStatus: 'Active',
-        leadCount: 0,
-        attentionReason: null,
-        lastActiveDate: null
-      },
-      {
-        id: 'EMP-00134',
-        name: 'Vũ Minh K',
-        code: 'NV1150',
-        email: null,
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: null,
-        zaloAssignedDate: null,
-        accountStatus: 'Unassigned',
-        employeeStatus: 'Active',
-        leadCount: 0,
-        attentionReason: null,
-        lastActiveDate: null
-      },
-      {
-        id: 'EMP-00135',
-        name: 'Bùi Tuấn M',
-        code: 'NV1160',
-        email: null, // Chưa có tài khoản thì không có email
-        branchId: 'HCM-01',
-        branchName: 'Hồ Chí Minh 01',
-        region: 'South',
-        accountId: null,
-        zaloAssignedDate: null,
-        accountStatus: 'Unassigned',
-        employeeStatus: 'Active',
-        leadCount: 0,
-        attentionReason: null,
-        lastActiveDate: null
-      },
-
-      // HCM-02
-      {
-        id: 'EMP-00201',
-        name: 'Đỗ Hoàng Mai',
-        code: 'NV2011',
-        email: 'maidh@fpt.com.vn',
-        branchId: 'HCM-02',
-        branchName: 'Hồ Chí Minh 02',
-        region: 'South',
-        accountId: 'ZENT-002011',
-        zaloAssignedDate: '12/04/2026',
-        accountStatus: 'Active',
-        employeeStatus: 'Active',
-        leadCount: 54,
-        attentionReason: null,
-        lastActiveDate: '24/09/2026'
-      },
-      {
-        id: 'EMP-00202',
-        name: 'Ngô Thanh Tùng',
-        code: 'NV2018',
-        email: 'tungnt@fpt.com.vn',
-        branchId: 'HCM-02',
-        branchName: 'Hồ Chí Minh 02',
-        region: 'South',
-        accountId: 'ZENT-002019',
-        zaloAssignedDate: '01/06/2026',
-        accountStatus: 'Suspended',
-        employeeStatus: 'Active',
-        leadCount: 22,
-        attentionReason: 'Tài khoản đang tạm khóa phục vụ rà soát hợp đồng',
-        lastActiveDate: '12/09/2026'
-      },
-      {
-        id: 'EMP-00203',
-        name: 'Trịnh Thị Hà',
-        code: 'NV2025',
-        email: 'hatt@fpt.com.vn',
-        branchId: 'HCM-02',
-        branchName: 'Hồ Chí Minh 02',
-        region: 'South',
-        accountId: null,
-        zaloAssignedDate: null,
-        accountStatus: 'Unassigned',
-        employeeStatus: 'Active',
-        leadCount: 0,
-        attentionReason: null,
-        lastActiveDate: null
-      },
-
-      // DAD-01 (Đà Nẵng)
-      {
-        id: 'EMP-00301',
-        name: 'Phan Văn Hưng',
-        code: 'NV3012',
-        email: 'hungpv@fpt.com.vn',
-        branchId: 'DAD-01',
-        branchName: 'Đà Nẵng 01',
-        region: 'Central',
-        accountId: 'ZENT-003012',
-        zaloAssignedDate: '18/03/2026',
-        accountStatus: 'Active',
-        employeeStatus: 'Active',
-        leadCount: 88,
-        attentionReason: null,
-        lastActiveDate: '25/09/2026'
-      },
-      {
-        id: 'EMP-00302',
-        name: 'Dương Thị Linh',
-        code: 'NV3019',
-        email: 'linhdt@fpt.com.vn',
-        branchId: 'DAD-01',
-        branchName: 'Đà Nẵng 01',
-        region: 'Central',
-        accountId: 'ZENT-003019',
-        zaloAssignedDate: '22/07/2026',
-        accountStatus: 'Active',
-        employeeStatus: 'Terminated',
-        leadCount: 41,
-        attentionReason: 'Nhân sự đã nghỉ việc nhưng tài khoản Zalo vẫn mở (Nguy cơ rò rỉ dữ liệu)',
-        lastActiveDate: '18/09/2026'
-      },
-      {
-        id: 'EMP-00303',
-        name: 'Nguyễn Hữu Trí',
-        code: 'NV3028',
-        email: 'trinh@fpt.com.vn',
-        branchId: 'DAD-01',
-        branchName: 'Đà Nẵng 01',
-        region: 'Central',
-        accountId: 'ZENT-003028',
-        zaloAssignedDate: '24/09/2026',
-        pendingAssignedAt: '24/09/2026 08:00',
-        pendingHours: 30,
-        pendingOverdue: true,
-        accountStatus: 'Pending',
-        employeeStatus: 'Active',
-        leadCount: 12,
-        attentionReason: 'Chờ kích hoạt quá hạn (30h chưa đăng nhập)',
-        lastActiveDate: null
-      },
-
-      // HAN-01 (Hà Nội)
-      {
-        id: 'EMP-00401',
-        name: 'Nguyễn Trọng Đại',
-        code: 'NV4011',
-        email: 'daint@fpt.com.vn',
-        branchId: 'HAN-01',
-        branchName: 'Hà Nội 01',
-        region: 'North',
-        accountId: 'ZENT-004011',
-        zaloAssignedDate: '05/02/2026',
-        accountStatus: 'Active',
-        employeeStatus: 'Active',
-        leadCount: 95,
-        attentionReason: null,
-        lastActiveDate: '25/09/2026'
-      },
-      {
-        id: 'EMP-00402',
-        name: 'Lê Thu Hương',
-        code: 'NV4018',
-        email: 'huonglt@fpt.com.vn',
-        branchId: 'HAN-01',
-        branchName: 'Hà Nội 01',
-        region: 'North',
-        accountId: 'ZENT-004018',
-        zaloAssignedDate: '14/05/2026',
-        accountStatus: 'Active',
-        employeeStatus: 'Active',
-        leadCount: 12,
-        attentionReason: 'Tài khoản không phát sinh hoạt động trao đổi > 30 ngày (Lãng phí Quota)',
-        lastActiveDate: '15/08/2026'
-      },
-      {
-        id: 'EMP-00403',
-        name: 'Phạm Đức Long',
-        code: 'NV4025',
-        email: 'longpd@fpt.com.vn',
-        branchId: 'HAN-01',
-        branchName: 'Hà Nội 01',
-        region: 'North',
-        accountId: 'ZENT-004025',
-        zaloAssignedDate: '10/01/2026',
-        accountStatus: 'Suspended',
-        employeeStatus: 'Active',
-        leadCount: 18,
-        attentionReason: 'Tài khoản tạm khóa theo yêu cầu phòng Pháp chế',
-        lastActiveDate: '01/09/2026'
-      },
-      {
-        id: 'EMP-00404',
-        name: 'Cao Thị Nguyệt',
-        code: 'NV4032',
-        email: 'nguyetct@fpt.com.vn',
-        branchId: 'HAN-01',
-        branchName: 'Hà Nội 01',
-        region: 'North',
-        accountId: 'ZENT-004032',
-        zaloAssignedDate: '25/09/2026',
-        pendingAssignedAt: '25/09/2026 09:00',
-        pendingHours: 5,
-        pendingOverdue: false,
-        accountStatus: 'Pending',
-        employeeStatus: 'Active',
-        leadCount: 0,
-        attentionReason: null,
-        lastActiveDate: null
-      }
-    ],
-
-    // Sổ nhật ký kiểm toán hành chính chuẩn 5 trường (D-020)
-    auditLogs: [
-      {
-        id: 'LOG-001',
-        timestamp: '25/09/2026 10:45',
-        actor: 'Vũ Minh Tuấn (Super Admin)',
-        action: 'Tạm khóa',
-        target: 'Lê Văn C (ZENT-001295)',
-        branch: 'Hồ Chí Minh 01 (HCM-01)',
-        impact: 'Tạm khóa tài khoản'
-      },
-      {
-        id: 'LOG-002',
-        timestamp: '24/09/2026 15:30',
-        actor: 'Lê Hoàng Nam (Admin Chi nhánh)',
-        action: 'Bàn giao',
-        target: 'Bùi Tuấn M ➔ Nguyễn Văn A (ZENT-001293)',
-        branch: 'Hồ Chí Minh 01 (HCM-01)',
-        impact: 'Quota giữ nguyên (chuyển quyền sở hữu)'
-      },
-      {
-        id: 'LOG-003',
-        timestamp: '18/09/2026 09:15',
-        actor: 'Lê Hoàng Nam (Admin Chi nhánh)',
-        action: 'Thu hồi',
-        target: 'Nguyễn Thành Nam (ZENT-001089)',
-        branch: 'Hồ Chí Minh 01 (HCM-01)',
-        impact: 'Chưa sử dụng +1 (Lưu 48 leads vào kho)'
-      },
-      {
-        id: 'LOG-004',
-        timestamp: '15/09/2026 14:20',
-        actor: 'Vũ Minh Tuấn (Super Admin)',
-        action: 'Cấp mới',
-        target: 'Trần Thị B (ZENT-001294)',
-        branch: 'Hồ Chí Minh 01 (HCM-01)',
-        impact: 'Đang dùng +1, Chưa dùng -1'
-      },
-      {
-        id: 'LOG-005',
-        timestamp: '10/09/2026 08:30',
-        actor: 'Vũ Minh Tuấn (Super Admin)',
-        action: 'Mở khóa',
-        target: 'Nguyễn Văn A (ZENT-001293)',
-        branch: 'Hồ Chí Minh 01 (HCM-01)',
-        impact: 'Quota giữ nguyên'
-      }
-    ]
-  };
-
-  // State runtime
-    // Snapshot số lượng mẫu nhân viên ban đầu để tính delta phản ứng thời gian thực
-  const INITIAL_SAMPLE_COUNTS = {
-    'HCM-01': { active: 3, pending: 1, suspended: 1, attention: 3 },
-    'HCM-02': { active: 1, pending: 0, suspended: 1, attention: 1 },
-    'DAD-01': { active: 2, pending: 1, suspended: 0, attention: 1 },
-    'HAN-01': { active: 2, pending: 1, suspended: 1, attention: 2 }
-  };
-
-  let state = loadState();
-
-  function loadState() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const loaded = JSON.parse(saved);
-        loaded.activeView = 'overview'; // Tab mặc định khi mở web luôn là overview
-        loaded.allocationFilters = loaded.allocationFilters || {
-          search: '',
-          region: 'ALL',
-          utilizationStatus: 'ALL'
-        };
-        return loaded;
-      }
-    } catch (e) {
-      console.warn('Cannot load state, using initial');
+    {
+      id: 'V2',
+      name: 'Vùng 2 - Tây Bắc Bộ',
+      quota: 8,
+      branches: [
+        { id: 'B201', name: 'Chi nhánh Sơn La', quota: 4, assigned: 3, unassigned: 1 },
+        { id: 'B202', name: 'Chi nhánh Điện Biên', quota: 4, assigned: 2, unassigned: 2 }
+      ]
+    },
+    {
+      id: 'V3',
+      name: 'Vùng 3 - Đông Bắc Bộ',
+      quota: 8,
+      branches: [
+        { id: 'B301', name: 'Chi nhánh Hải Phòng', quota: 4, assigned: 3, unassigned: 1 },
+        { id: 'B302', name: 'Chi nhánh Quảng Ninh', quota: 4, assigned: 3, unassigned: 1 }
+      ]
+    },
+    {
+      id: 'V4',
+      name: 'Vùng 4 - Miền Trung',
+      quota: 10,
+      branches: [
+        { id: 'B401', name: 'Chi nhánh Đà Nẵng', quota: 6, assigned: 4, unassigned: 2 },
+        { id: 'B402', name: 'Chi nhánh Huế', quota: 4, assigned: 2, unassigned: 2 }
+      ]
+    },
+    {
+      id: 'V5',
+      name: 'Vùng 5 - TP.HCM',
+      quota: 20,
+      branches: [
+        { id: 'B501', name: 'Chi nhánh Quận 1', quota: 10, assigned: 9, unassigned: 1 },
+        { id: 'B502', name: 'Chi nhánh Tân Bình', quota: 10, assigned: 8, unassigned: 2 }
+      ]
+    },
+    {
+      id: 'V6',
+      name: 'Vùng 6 - Đông Nam Bộ',
+      quota: 4,
+      branches: [
+        { id: 'B601', name: 'Chi nhánh Bình Dương', quota: 2, assigned: 1, unassigned: 1 },
+        { id: 'B602', name: 'Chi nhánh Đồng Nai', quota: 2, assigned: 1, unassigned: 1 }
+      ]
+    },
+    {
+      id: 'V7',
+      name: 'Vùng 7 - Tây Nam Bộ',
+      quota: 4,
+      branches: [
+        { id: 'B701', name: 'Chi nhánh Cần Thơ', quota: 2, assigned: 1, unassigned: 1 },
+        { id: 'B702', name: 'Chi nhánh An Giang', quota: 2, assigned: 1, unassigned: 1 }
+      ]
     }
-    const initial = JSON.parse(JSON.stringify(INITIAL_STATE));
-    initial.activeView = 'overview';
-    return initial;
-  }
+  ],
 
-  function saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
-      console.warn('Cannot save state');
+  // Danh mục chi nhánh mở rộng tiềm năng (Chưa được cấp Quota - quota = 0)
+  expansionBranches: [
+    { name: 'Chi nhánh Đống Đa', region: 'Vùng 1 - Hà Nội' },
+    { name: 'Chi nhánh Tây Hồ', region: 'Vùng 1 - Hà Nội' },
+    { name: 'Chi nhánh Long Biên', region: 'Vùng 1 - Hà Nội' },
+    { name: 'Chi nhánh Lào Cai', region: 'Vùng 2 - Tây Bắc Bộ' },
+    { name: 'Chi nhánh Hòa Bình', region: 'Vùng 2 - Tây Bắc Bộ' },
+    { name: 'Chi nhánh Bắc Ninh', region: 'Vùng 3 - Đông Bắc Bộ' },
+    { name: 'Chi nhánh Thái Nguyên', region: 'Vùng 3 - Đông Bắc Bộ' },
+    { name: 'Chi nhánh Nha Trang (Khánh Hòa)', region: 'Vùng 4 - Miền Trung' },
+    { name: 'Chi nhánh Quảng Nam', region: 'Vùng 4 - Miền Trung' },
+    { name: 'Chi nhánh TP Thủ Đức', region: 'Vùng 5 - TP.HCM' },
+    { name: 'Chi nhánh Bình Thạnh', region: 'Vùng 5 - TP.HCM' },
+    { name: 'Chi nhánh Gò Vấp', region: 'Vùng 5 - TP.HCM' },
+    { name: 'Chi nhánh Vũng Tàu', region: 'Vùng 6 - Đông Nam Bộ' },
+    { name: 'Chi nhánh Tiền Giang', region: 'Vùng 7 - Tây Nam Bộ' },
+    { name: 'Chi nhánh Cà Mau', region: 'Vùng 7 - Tây Nam Bộ' }
+  ],
+
+  // 100 Accounts dataset initialized from baseline specs
+  accounts: [],
+
+  // Available HR employees for assignment mock across branches
+  hrEmployees: [
+    // Vùng 1 - Hà Nội
+    { code: 'NV10492', name: 'Nguyễn Văn Minh', email: 'minhnv29@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Ba Đình', dept: 'Kinh doanh Doanh nghiệp', status: 'ACTIVE' },
+    { code: 'NV10518', name: 'Trần Thị Thu Hà', email: 'hatt41@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Ba Đình', dept: 'Chăm sóc Khách hàng', status: 'ACTIVE' },
+    { code: 'NV10520', name: 'Vũ Hải Nam', email: 'namvh@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Ba Đình', dept: 'Kỹ thuật Hiện trường', status: 'ACTIVE' },
+    { code: 'NV10822', name: 'Lê Hoàng Nam', email: 'namlh12@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Cầu Giấy', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV10825', name: 'Đỗ Thúy Vy', email: 'vydt@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Cầu Giấy', dept: 'Dịch vụ Khách hàng', status: 'ACTIVE' },
+    { code: 'NV10901', name: 'Nguyễn Quốc Anh', email: 'anhnq@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Đống Đa', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV10905', name: 'Hoàng Bích Phương', email: 'phuonghb@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Tây Hồ', dept: 'Tư vấn Giải pháp', status: 'ACTIVE' },
+    { code: 'NV10910', name: 'Phạm Minh Đức', email: 'ducpm@fpt.com', region: 'Vùng 1 - Hà Nội', branch: 'Chi nhánh Long Biên', dept: 'Kỹ thuật & Hạ tầng', status: 'ACTIVE' },
+    // Vùng 2 - Tây Bắc Bộ
+    { code: 'NV20101', name: 'Lò Văn Mười', email: 'muoilv@fpt.com', region: 'Vùng 2 - Tây Bắc Bộ', branch: 'Chi nhánh Sơn La', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV20105', name: 'Quàng Thị Mai', email: 'maiqt@fpt.com', region: 'Vùng 2 - Tây Bắc Bộ', branch: 'Chi nhánh Sơn La', dept: 'Chăm sóc Khách hàng', status: 'ACTIVE' },
+    { code: 'NV20120', name: 'Trần Văn Bách', email: 'bachtv@fpt.com', region: 'Vùng 2 - Tây Bắc Bộ', branch: 'Chi nhánh Điện Biên', dept: 'Kỹ thuật & Hạ tầng', status: 'ACTIVE' },
+    { code: 'NV20130', name: 'Bùi Văn Thắng', email: 'thangbv@fpt.com', region: 'Vùng 2 - Tây Bắc Bộ', branch: 'Chi nhánh Hòa Bình', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV20140', name: 'Vàng A Súa', email: 'suava@fpt.com', region: 'Vùng 2 - Tây Bắc Bộ', branch: 'Chi nhánh Lào Cai', dept: 'Dịch vụ Khách hàng', status: 'ACTIVE' },
+    // Vùng 3 - Đông Bắc Bộ
+    { code: 'NV30101', name: 'Trần Tuấn Kiệt', email: 'kiettt@fpt.com', region: 'Vùng 3 - Đông Bắc Bộ', branch: 'Chi nhánh Hải Phòng', dept: 'Kinh doanh Doanh nghiệp', status: 'ACTIVE' },
+    { code: 'NV30105', name: 'Lê Quỳnh Nga', email: 'ngalq@fpt.com', region: 'Vùng 3 - Đông Bắc Bộ', branch: 'Chi nhánh Hải Phòng', dept: 'Chăm sóc Khách hàng', status: 'ACTIVE' },
+    { code: 'NV30115', name: 'Nguyễn Văn Đạt', email: 'datnv3@fpt.com', region: 'Vùng 3 - Đông Bắc Bộ', branch: 'Chi nhánh Quảng Ninh', dept: 'Kỹ thuật Hiện trường', status: 'ACTIVE' },
+    { code: 'NV30125', name: 'Nguyễn Đức Thịnh', email: 'thinhnd@fpt.com', region: 'Vùng 3 - Đông Bắc Bộ', branch: 'Chi nhánh Bắc Ninh', dept: 'Kinh doanh Doanh nghiệp', status: 'ACTIVE' },
+    { code: 'NV30135', name: 'Dương Thu Hằng', email: 'hangdt@fpt.com', region: 'Vùng 3 - Đông Bắc Bộ', branch: 'Chi nhánh Thái Nguyên', dept: 'Dịch vụ Khách hàng', status: 'ACTIVE' },
+    // Vùng 4 - Miền Trung
+    { code: 'NV40190', name: 'Hoàng Anh Tuấn', email: 'tuanha8@fpt.com', region: 'Vùng 4 - Miền Trung', branch: 'Chi nhánh Đà Nẵng', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV40195', name: 'Phan Mỹ Lệ', email: 'lepm@fpt.com', region: 'Vùng 4 - Miền Trung', branch: 'Chi nhánh Đà Nẵng', dept: 'Chăm sóc Khách hàng', status: 'ACTIVE' },
+    { code: 'NV40210', name: 'Lê Khắc Huy', email: 'huylk@fpt.com', region: 'Vùng 4 - Miền Trung', branch: 'Chi nhánh Huế', dept: 'Kỹ thuật Hiện trường', status: 'ACTIVE' },
+    { code: 'NV40220', name: 'Võ Minh Trí', email: 'trivm@fpt.com', region: 'Vùng 4 - Miền Trung', branch: 'Chi nhánh Nha Trang (Khánh Hòa)', dept: 'Tư vấn Doanh nghiệp', status: 'ACTIVE' },
+    { code: 'NV40230', name: 'Trần Đại Nghĩa', email: 'nghiatd@fpt.com', region: 'Vùng 4 - Miền Trung', branch: 'Chi nhánh Quảng Nam', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    // Vùng 5 - TP.HCM
+    { code: 'NV50114', name: 'Phạm Quốc Bảo', email: 'baopq@fpt.com', region: 'Vùng 5 - TP.HCM', branch: 'Chi nhánh Quận 1', dept: 'Kinh doanh Doanh nghiệp', status: 'ACTIVE' },
+    { code: 'NV50118', name: 'Nguyễn Thị Cẩm Tú', email: 'tuntc@fpt.com', region: 'Vùng 5 - TP.HCM', branch: 'Chi nhánh Quận 1', dept: 'Chăm sóc Khách hàng', status: 'ACTIVE' },
+    { code: 'NV50349', name: 'Đỗ Mỹ Linh', email: 'linhdm5@fpt.com', region: 'Vùng 5 - TP.HCM', branch: 'Chi nhánh Tân Bình', dept: 'Dịch vụ Khách hàng', status: 'ACTIVE' },
+    { code: 'NV50355', name: 'Trần Hữu Phước', email: 'phuocth@fpt.com', region: 'Vùng 5 - TP.HCM', branch: 'Chi nhánh Tân Bình', dept: 'Kỹ thuật & Hạ tầng', status: 'ACTIVE' },
+    { code: 'NV50410', name: 'Huỳnh Tấn Đạt', email: 'datht@fpt.com', region: 'Vùng 5 - TP.HCM', branch: 'Chi nhánh TP Thủ Đức', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV50420', name: 'Mai Phương Thảo', email: 'thaomp@fpt.com', region: 'Vùng 5 - TP.HCM', branch: 'Chi nhánh Bình Thạnh', dept: 'Tư vấn Giải pháp', status: 'ACTIVE' },
+    { code: 'NV50430', name: 'Lê Thanh Bình', email: 'binhlt@fpt.com', region: 'Vùng 5 - TP.HCM', branch: 'Chi nhánh Gò Vấp', dept: 'Kỹ thuật Hiện trường', status: 'ACTIVE' },
+    // Vùng 6 - Đông Nam Bộ
+    { code: 'NV60101', name: 'Lê Văn Khang', email: 'khanglv@fpt.com', region: 'Vùng 6 - Đông Nam Bộ', branch: 'Chi nhánh Đồng Nai', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV60110', name: 'Nguyễn Thị Diễm', email: 'diemnt@fpt.com', region: 'Vùng 6 - Đông Nam Bộ', branch: 'Chi nhánh Bình Dương', dept: 'Chăm sóc Khách hàng', status: 'ACTIVE' },
+    { code: 'NV60120', name: 'Trịnh Quốc Toàn', email: 'toantq@fpt.com', region: 'Vùng 6 - Đông Nam Bộ', branch: 'Chi nhánh Vũng Tàu', dept: 'Kinh doanh Doanh nghiệp', status: 'ACTIVE' },
+    // Vùng 7 - Tây Nam Bộ
+    { code: 'NV70101', name: 'Nguyễn Thanh Phong', email: 'phongnt@fpt.com', region: 'Vùng 7 - Tây Nam Bộ', branch: 'Chi nhánh Cần Thơ', dept: 'Kinh doanh Doanh nghiệp', status: 'ACTIVE' },
+    { code: 'NV70108', name: 'Võ Thùy Trang', email: 'trangvt@fpt.com', region: 'Vùng 7 - Tây Nam Bộ', branch: 'Chi nhánh Cần Thơ', dept: 'Chăm sóc Khách hàng', status: 'ACTIVE' },
+    { code: 'NV70120', name: 'Lâm Văn Út', email: 'utlv@fpt.com', region: 'Vùng 7 - Tây Nam Bộ', branch: 'Chi nhánh An Giang', dept: 'Kỹ thuật Hiện trường', status: 'ACTIVE' },
+    { code: 'NV70130', name: 'Phan Tấn Lộc', email: 'locpt@fpt.com', region: 'Vùng 7 - Tây Nam Bộ', branch: 'Chi nhánh Tiền Giang', dept: 'Kinh doanh Khách hàng', status: 'ACTIVE' },
+    { code: 'NV70140', name: 'Nguyễn Hữu Tài', email: 'tainh@fpt.com', region: 'Vùng 7 - Tây Nam Bộ', branch: 'Chi nhánh Cà Mau', dept: 'Dịch vụ Khách hàng', status: 'ACTIVE' }
+  ],
+
+  // System Audit Log (Mocked realistically with operational trace for prototype)
+  auditLogs: [
+    {
+      id: 'LOG-015',
+      timestamp: '28/09/2026 10:15:20',
+      actor: 'Hệ thống HR Sync',
+      role: 'System',
+      action: 'Cảnh báo nhân sự',
+      target: 'ZA-015',
+      detail: 'Nhân sự nghỉ việc từ 20/09/2026. Đề xuất thu hồi tài khoản về Kho trung tâm'
+    },
+    {
+      id: 'LOG-014',
+      timestamp: '28/09/2026 09:30:00',
+      actor: 'Hệ thống An toàn TT',
+      role: 'System',
+      action: 'Cảnh báo bảo mật',
+      target: 'ZA-028',
+      detail: 'Phát hiện đăng nhập từ IP lạ ngoài dải mạng doanh nghiệp (118.69.182.45)'
+    },
+    {
+      id: 'LOG-013',
+      timestamp: '27/09/2026 15:45:10',
+      actor: 'Admin Ba Đình',
+      role: 'Admin chi nhánh',
+      action: 'Gán tài khoản',
+      target: 'ZA-003',
+      detail: 'Cấp tài khoản cho nhân sự mới, trạng thái Chờ kích hoạt (gửi link kích hoạt qua email công ty, hạn 3 ngày)'
+    },
+    {
+      id: 'LOG-012',
+      timestamp: '27/09/2026 14:20:30',
+      actor: 'Admin Cầu Giấy',
+      role: 'Admin chi nhánh',
+      action: 'Gán tài khoản',
+      target: 'ZA-007',
+      detail: 'Cấp tài khoản cho nhân sự mới, trạng thái Chờ kích hoạt (gửi link kích hoạt qua email công ty, hạn 3 ngày)'
+    },
+    {
+      id: 'LOG-011',
+      timestamp: '27/09/2026 11:10:00',
+      actor: 'Admin Đống Đa',
+      role: 'Admin chi nhánh',
+      action: 'Gán tài khoản',
+      target: 'ZA-009',
+      detail: 'Cấp tài khoản cho nhân sự mới, trạng thái Chờ kích hoạt (gửi link kích hoạt qua email công ty, hạn 3 ngày)'
+    },
+    {
+      id: 'LOG-010',
+      timestamp: '26/09/2026 16:30:15',
+      actor: 'Super Admin',
+      role: 'Super Admin',
+      action: 'Tạm khóa',
+      target: 'ZA-020',
+      detail: 'Tạm khóa tài khoản theo yêu cầu an toàn thông tin rà soát nội bộ'
+    },
+    {
+      id: 'LOG-009',
+      timestamp: '26/09/2026 15:20:00',
+      actor: 'Super Admin',
+      role: 'Super Admin',
+      action: 'Tạm khóa',
+      target: 'ZA-035',
+      detail: 'Tạm khóa tài khoản theo yêu cầu an toàn thông tin rà soát nội bộ'
+    },
+    {
+      id: 'LOG-008',
+      timestamp: '26/09/2026 14:30:00',
+      actor: 'Super Admin',
+      role: 'Super Admin',
+      action: 'Thu hồi',
+      target: 'ZA-071',
+      detail: 'Thu hồi từ nhân sự Trần Văn Hùng (Chi nhánh Ba Đình) về Kho trung tâm do nghỉ việc'
+    },
+    {
+      id: 'LOG-007',
+      timestamp: '26/09/2026 11:00:00',
+      actor: 'Super Admin',
+      role: 'Super Admin',
+      action: 'Tạm khóa',
+      target: 'ZA-050',
+      detail: 'Tạm khóa tài khoản theo yêu cầu an toàn thông tin rà soát nội bộ'
+    },
+    {
+      id: 'LOG-006',
+      timestamp: '25/09/2026 14:15:00',
+      actor: 'Hệ thống HR Sync',
+      role: 'System',
+      action: 'Cảnh báo nhân sự',
+      target: 'ZA-022',
+      detail: 'Nhân sự nghỉ việc từ 18/09/2026. Đề xuất thu hồi tài khoản về Kho trung tâm'
+    },
+    {
+      id: 'LOG-005',
+      timestamp: '25/09/2026 10:20:00',
+      actor: 'Hệ thống HR Sync',
+      role: 'System',
+      action: 'Cảnh báo điều chuyển',
+      target: 'ZA-041',
+      detail: 'Nhân sự đã điều chuyển chi nhánh trên HR, đề xuất bàn giao hoặc chuyển quota'
+    },
+    {
+      id: 'LOG-004',
+      timestamp: '25/09/2026 08:35:10',
+      actor: 'Super Admin',
+      role: 'Super Admin',
+      action: 'Đồng bộ Zalo',
+      target: 'Toàn hệ thống',
+      detail: 'Đồng bộ 100 Account ID từ Zalo Cloud API thành công'
+    },
+    {
+      id: 'LOG-003',
+      timestamp: '24/09/2026 16:20:00',
+      actor: 'Super Admin',
+      role: 'Super Admin',
+      action: 'Phân bổ Quota',
+      target: 'Vùng 5 - TP.HCM',
+      detail: 'Cấp thêm 2 tài khoản cho Chi nhánh Quận 1 từ Kho trung tâm'
+    },
+    {
+      id: 'LOG-002',
+      timestamp: '24/09/2026 14:10:45',
+      actor: 'Admin Ba Đình',
+      role: 'Admin chi nhánh',
+      action: 'Gán tài khoản',
+      target: 'ZA-002',
+      detail: 'Gán tài khoản cho nhân viên Trần Thị Mai (maitt@fpt.com)'
+    },
+    {
+      id: 'LOG-001',
+      timestamp: '20/09/2026 09:00:00',
+      actor: 'Super Admin',
+      role: 'Super Admin',
+      action: 'Khởi tạo hệ thống',
+      target: 'Toàn hệ thống',
+      detail: 'Khởi tạo danh sách 100 tài khoản Zalo Enterprise và phân bổ ban đầu cho 7 Vùng'
     }
-  }
+  ],
 
-  function formatNumber(num) {
-    if (num === null || num === undefined || isNaN(num)) return '0';
-    return Number(num).toLocaleString('vi-VN');
-  }
+  // UI Filter State for Accounts view
+  accountFilters: {
+    status: 'all', // 'all' | 'unassigned' | 'active' | 'pending' | 'locked' | 'warning'
+    search: '',
+    region: 'all',
+    branch: 'all',
+    onlyAttention: false
+  },
 
-  // =========================================================================
-  // 2. ENGINE TÍNH TOÁN QUOTA & THỐNG KÊ TOÀN DIỆN
-  // =========================================================================
+  activeDrawerAccount: null
+};
 
-  /**
-   * Tính toán số liệu Quota cho một chi nhánh cụ thể:
-   * Tổng Quota = Đang dùng + Chưa dùng
-   * Đang dùng = Đang hoạt động + Tạm khóa
-   */
-  function getBranchQuotaStats(branchId) {
-    let branchConfig = null;
-    let regionId = '';
-    for (const r of state.orgTree.regions) {
-      const b = r.branches.find(x => x.id === branchId);
-      if (b) {
-        branchConfig = b;
-        regionId = r.id;
-        break;
-      }
-    }
-    if (!branchConfig) return null;
+// Initialize the 100 accounts baseline (CR-001)
+function initAccountsData() {
+  const accounts = [];
+  let seq = 1;
 
-    const baseActive = branchConfig.baseActive || 0;
-    const basePending = branchConfig.basePending || 0;
-    const baseSuspended = branchConfig.baseSuspended || 0;
-    const baseAttention = branchConfig.baseAttention || 0;
+  // Pool of realistic Vietnamese employee profiles for FPT Telecom
+  const REAL_EMPLOYEE_POOL = [
+    { name: 'Nguyễn Văn An', user: 'annv', dept: 'Kinh doanh KHDN' },
+    { name: 'Trần Thị Mai', user: 'maitt', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Lê Hoàng Long', user: 'longlh2', dept: 'Kỹ thuật & Hạ tầng' },
+    { name: 'Phạm Thu Trang', user: 'trangpt', dept: 'Dịch vụ Khách hàng' },
+    { name: 'Vũ Đức Thắng', user: 'thangvd', dept: 'Kinh doanh Cá nhân' },
+    { name: 'Đỗ Minh Quân', user: 'quandm', dept: 'Quản lý Thu cước' },
+    { name: 'Hoàng Bích Ngọc', user: 'ngochb', dept: 'Tư vấn Doanh nghiệp' },
+    { name: 'Bùi Tuấn Anh', user: 'anhbt3', dept: 'Kỹ thuật Hiện trường' },
+    { name: 'Ngô Thanh Hà', user: 'hant', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Đặng Quốc Huy', user: 'huydq', dept: 'Kinh doanh KHDN' },
+    { name: 'Dương Thùy Linh', user: 'linhdt', dept: 'Dịch vụ Khách hàng' },
+    { name: 'Lý Gia Hưng', user: 'hunglg', dept: 'Kỹ thuật & Hạ tầng' },
+    { name: 'Mai Khánh Linh', user: 'linhmk', dept: 'Tư vấn Giải pháp' },
+    { name: 'Hồ Quang Dũng', user: 'dunghq', dept: 'Kinh doanh Cá nhân' },
+    { name: 'Trịnh Phương Thảo', user: 'thaotp', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Võ Thành Nam', user: 'namvt', dept: 'Hạ tầng Mạng viễn thông' },
+    { name: 'Nguyễn Kiều Oanh', user: 'oanhnk', dept: 'Dịch vụ Khách hàng' },
+    { name: 'Trần Đình Trọng', user: 'trongtd', dept: 'Kinh doanh KHDN' },
+    { name: 'Lê Thị Thu Hương', user: 'huonglt', dept: 'Hỗ trợ Kỹ thuật' },
+    { name: 'Phan Hữu Nghĩa', user: 'nghiaph', dept: 'Phát triển Khách hàng' },
+    { name: 'Đinh Xuân Trường', user: 'truongdx', dept: 'Kỹ thuật & Hạ tầng' },
+    { name: 'Tạ Thị Thanh Tâm', user: 'tamttt', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Lâm Hải Đăng', user: 'danglh', dept: 'Kinh doanh Cá nhân' },
+    { name: 'Chu Tuấn Kiệt', user: 'kietct', dept: 'Tư vấn Doanh nghiệp' },
+    { name: 'Nguyễn Hồng Phúc', user: 'phucnh', dept: 'Quản lý Dịch vụ' },
+    { name: 'Trần Việt Dũng', user: 'dungtv', dept: 'Kỹ thuật Hiện trường' },
+    { name: 'Phạm Mỹ Duyên', user: 'duyenpm', dept: 'Dịch vụ Khách hàng' },
+    { name: 'Vũ Minh Trí', user: 'trivm', dept: 'Kinh doanh KHDN' },
+    { name: 'Đỗ Cẩm Nhung', user: 'nhungdc', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Hoàng Gia Bảo', user: 'baohg', dept: 'Hỗ trợ Kỹ thuật' },
+    { name: 'Bùi Thị Lan Anh', user: 'anhbtl', dept: 'Kinh doanh Cá nhân' },
+    { name: 'Ngô Quang Vinh', user: 'vinhnq', dept: 'Hạ tầng Viễn thông' },
+    { name: 'Đặng Bảo Châu', user: 'chaudb', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Dương Thế Vinh', user: 'vinhdt', dept: 'Kinh doanh KHDN' },
+    { name: 'Lý Thảo My', user: 'mylt', dept: 'Dịch vụ Khách hàng' },
+    { name: 'Hà Trọng Nhân', user: 'nhanht', dept: 'Kỹ thuật Hiện trường' },
+    { name: 'Trịnh Nhật Minh', user: 'minhtn', dept: 'Phát triển Thị trường' },
+    { name: 'Võ Thúy Kiều', user: 'kieuvt', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Nguyễn Hùng Cường', user: 'cuongnh', dept: 'Kỹ thuật & Hạ tầng' },
+    { name: 'Trần Thanh Tú', user: 'tutt', dept: 'Kinh doanh KHDN' },
+    { name: 'Lê Quốc Thịnh', user: 'thinhlq', dept: 'Hỗ trợ Kỹ thuật' },
+    { name: 'Phạm Ngọc Hân', user: 'hanpn', dept: 'Dịch vụ Khách hàng' },
+    { name: 'Vũ Đình Phong', user: 'phongvd', dept: 'Kinh doanh Cá nhân' },
+    { name: 'Đỗ Khánh Toàn', user: 'toandk', dept: 'Kỹ thuật Hiện trường' },
+    { name: 'Hoàng Thu Thủy', user: 'thuyht', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Bùi Quốc Triệu', user: 'trieubq', dept: 'Kinh doanh KHDN' },
+    { name: 'Ngô Nhật Linh', user: 'linhnn', dept: 'Dịch vụ Khách hàng' },
+    { name: 'Đặng Tiến Đạt', user: 'datdt', dept: 'Kỹ thuật & Hạ tầng' },
+    { name: 'Dương Minh Châu', user: 'chaudm', dept: 'Chăm sóc Khách hàng' },
+    { name: 'Lý Quốc Trung', user: 'trunglq', dept: 'Phát triển Thị trường' },
+    { name: 'Hồ Bảo Nam', user: 'namhb', dept: 'Kỹ thuật Hiện trường' },
+    { name: 'Trịnh Thùy Trang', user: 'trangtt', dept: 'Dịch vụ Khách hàng' }
+  ];
 
-    const branchEmps = state.employees.filter(e => e.branchId === branchId);
-    const currentActive = branchEmps.filter(e => e.accountStatus === 'Active').length;
-    const currentPending = branchEmps.filter(e => e.accountStatus === 'Pending').length;
-    const currentSuspended = branchEmps.filter(e => e.accountStatus === 'Suspended').length;
-    const currentAttention = branchEmps.filter(e => e.attentionReason !== null || e.employeeStatus === 'Terminated').length;
+  // Helper to format ID
+  const fmtId = (num) => `ZA-${String(num).padStart(3, '0')}`;
 
-    const initS = INITIAL_SAMPLE_COUNTS[branchId] || { active: currentActive, pending: currentPending, suspended: currentSuspended, attention: currentAttention };
-    const deltaActive = currentActive - initS.active;
-    const deltaPending = currentPending - initS.pending;
-    const deltaSuspended = currentSuspended - initS.suspended;
-    const deltaAttention = currentAttention - initS.attention;
+  // 1. Generate allocated accounts for 14 branches across 7 regions (70 accounts: ZA-001 -> ZA-070)
+  AppState.regions.forEach(region => {
+    region.branches.forEach(branch => {
+      for (let i = 0; i < branch.quota; i++) {
+        const id = fmtId(seq++);
+        let status = 'ACTIVE';
+        let attention = null;
+        
+        const emp = REAL_EMPLOYEE_POOL[(seq - 2) % REAL_EMPLOYEE_POOL.length];
+        const empName = emp.name;
+        const empEmail = `${emp.user}@fpt.com`;
+        const empDept = emp.dept || 'Kinh doanh Khách hàng';
+        const empCode = `NV${10000 + seq}`;
+        const empPhone = `098${seq % 9 + 1}.345.${100 + seq}`;
+        const displayName = empName;
+        const username = emp.user;
 
-    const active = Math.max(0, baseActive + deltaActive);
-    const pending = Math.max(0, basePending + deltaPending);
-    const suspended = Math.max(0, baseSuspended + deltaSuspended);
-    const attention = Math.max(0, baseAttention + deltaAttention);
-
-    const inUse = active + pending + suspended;
-    const totalQuota = branchConfig.totalQuota || 0;
-    const available = Math.max(0, totalQuota - inUse);
-    const utilization = totalQuota > 0 ? ((inUse / totalQuota) * 100).toFixed(1) : 0;
-
-    return {
-      branchId,
-      branchName: branchConfig.name,
-      regionId,
-      totalQuota,
-      inUse,
-      available,
-      active,
-      pending,
-      suspended,
-      attention,
-      utilization: parseFloat(utilization)
-    };
-  }
-
-  function getSystemSummary() {
-    let totalQuota = 0;
-    let inUse = 0;
-    let available = 0;
-    let suspended = 0;
-    let attention = 0;
-    let active = 0;
-    let pending = 0;
-
-    if (state.currentPersona === 'branch_admin') {
-      const stats = getBranchQuotaStats('HCM-01');
-      return {
-        scopeName: 'Chi nhánh Hồ Chí Minh 01 (HCM-01)',
-        totalQuota: stats.totalQuota,
-        inUse: stats.inUse,
-        available: stats.available,
-        active: stats.active,
-        pending: stats.pending,
-        suspended: stats.suspended,
-        attention: stats.attention,
-        utilization: stats.utilization
-      };
-    }
-
-    for (const r of state.orgTree.regions) {
-      for (const b of r.branches) {
-        const stats = getBranchQuotaStats(b.id);
-        totalQuota += stats.totalQuota;
-        inUse += stats.inUse;
-        available += stats.available;
-        active += stats.active;
-        pending += stats.pending;
-        suspended += stats.suspended;
-        attention += stats.attention;
-      }
-    }
-
-    const companyReserve = Math.max(0, state.orgTree.totalCompanyQuota - totalQuota);
-    const utilization = totalQuota > 0 ? ((inUse / totalQuota) * 100).toFixed(1) : 0;
-
-    return {
-      scopeName: 'Toàn công ty (3 Vùng)',
-      totalCompanyQuota: state.orgTree.totalCompanyQuota,
-      totalAllocated: totalQuota,
-      companyReserve,
-      totalQuota,
-      inUse,
-      available,
-      active,
-      pending,
-      suspended,
-      attention,
-      utilization: parseFloat(utilization)
-    };
-  }
-
-  // =========================================================================
-  // 3. MAIN RENDER CONTROLLER
-  // =========================================================================
-
-  function renderApp() {
-    updateSidebarNav();
-    updateHeaderScope();
-
-    const container = document.getElementById('page-container');
-    if (!container) return;
-
-    if (state.activeView === 'overview') {
-      renderOverviewView(container);
-    } else if (state.activeView === 'quota' || state.activeView === 'employees_accounts') {
-      renderQuotaView(container);
-    } else if (state.activeView === 'quota_allocation') {
-      renderQuotaAllocationView(container);
-    } else if (state.activeView === 'audit_log') {
-      renderAuditLogView(container);
-    }
-
-    renderSideDrawer();
-  }
-
-  function updateSidebarNav() {
-    document.querySelectorAll('.sidebar-nav .nav-link, .sidebar-secondary .nav-link').forEach(link => {
-      const view = link.getAttribute('data-view');
-      const isQuotaActive = (state.activeView === 'quota' || state.activeView === 'employees_accounts');
-      const isQuotaLink = (view === 'quota' || view === 'employees_accounts');
-
-      if (view === state.activeView || (isQuotaActive && isQuotaLink)) {
-        link.classList.add('active');
-      } else {
-        link.classList.remove('active');
-      }
-    });
-
-    const attentionBadge = document.getElementById('sidebar-attention-badge');
-    if (attentionBadge) {
-      const summary = getSystemSummary();
-      if (summary.attention > 0) {
-        attentionBadge.textContent = summary.attention;
-        attentionBadge.style.display = 'inline-block';
-      } else {
-        attentionBadge.style.display = 'none';
-      }
-    }
-
-    const roleBadge = document.getElementById('user-role-badge');
-    const displayName = document.getElementById('user-display-name');
-    const avatar = document.getElementById('user-avatar-circle');
-
-    if (state.currentPersona === 'super_admin') {
-      if (roleBadge) roleBadge.textContent = 'Super Admin';
-      if (displayName) displayName.textContent = 'Vũ Minh Tuấn';
-      if (avatar) avatar.textContent = 'VT';
-    } else {
-      if (roleBadge) roleBadge.textContent = 'Admin Chi nhánh (HCM-01)';
-      if (displayName) displayName.textContent = 'Lê Hoàng Nam';
-      if (avatar) avatar.textContent = 'LN';
-    }
-  }
-
-  function updateHeaderScope() {
-    const scopeTag = document.getElementById('top-scope-tag');
-    if (scopeTag) {
-      if (state.currentPersona === 'super_admin') {
-        scopeTag.textContent = 'Phạm vi: Toàn công ty';
-        scopeTag.className = 'role-scope-tag';
-      } else {
-        scopeTag.textContent = 'Phạm vi: Chi nhánh HCM-01';
-        scopeTag.className = 'role-scope-tag scope-branch-locked';
-      }
-    }
-  }
-
-  // =========================================================================
-  // 4. VIEW 1: TỔNG QUAN (QUẢN LÝ QUOTA VÙNG & CHI NHÁNH)
-  // =========================================================================
-
-
-  // =========================================================================
-  // 4B. TRUNG TÂM CẢNH BÁO & VIỆC QUAN TRỌNG CẦN XỬ LÝ (ACTION HUB)
-  // =========================================================================
-
-  function renderOverviewActionHub(isBranchAdmin, summary) {
-    const pendingOverdue = state.employees.filter(e => e.accountStatus === 'Pending' && e.pendingOverdue);
-    const terminatedWithAcc = state.employees.filter(e => e.employeeStatus === 'Terminated' && (e.accountStatus === 'Active' || e.accountStatus === 'Pending' || e.accountStatus === 'Suspended'));
-    
-    // Tìm chi nhánh có tỷ lệ tải cao nhất (tiệm cận trần >= 88%)
-    let highestUtilBranch = null;
-    state.orgTree.regions.forEach(r => {
-      r.branches.forEach(b => {
-        const stats = getBranchQuotaStats(b.id);
-        if (!highestUtilBranch || stats.utilization > highestUtilBranch.utilization) {
-          highestUtilBranch = stats;
+        // Branch unassigned slots: ZA-008 (Ba Đình V1), ZA-019 (V2), ZA-032 (V3), ZA-058 (V5)
+        // Total: 4 UNASSIGNED at branches + 30 central + 60 ACTIVE + 3 PENDING + 3 LOCKED = 100
+        const BRANCH_UNASSIGNED_IDS = new Set(['ZA-008', 'ZA-019', 'ZA-032', 'ZA-058']);
+        const isBaDinhUnassigned = BRANCH_UNASSIGNED_IDS.has(id);
+        if (isBaDinhUnassigned) {
+          status = 'UNASSIGNED';
+          attention = null;
         }
-      });
-    });
-
-    // Tìm chi nhánh có Quota nhàn rỗi nhiều nhất (>= 20 Quota trống) để thu hồi về quỹ
-    let idleQuotaBranch = null;
-    state.orgTree.regions.forEach(r => {
-      r.branches.forEach(b => {
-        const stats = getBranchQuotaStats(b.id);
-        if (stats.available >= 20 && (!idleQuotaBranch || stats.available > idleQuotaBranch.available)) {
-          idleQuotaBranch = stats;
+        // Exactly 3 PENDING accounts (ZA-003 in Ba Đình, ZA-011 in Cầu Giấy, ZA-027 in Sơn La)
+        else if (id === 'ZA-003' || id === 'ZA-011' || id === 'ZA-027') {
+          status = 'PENDING';
+          attention = { severity: 'WARNING', title: 'Tài khoản chưa được kích hoạt quá 3 ngày' };
+        } 
+        // Exactly 3 LOCKED accounts (ZA-020, ZA-035, ZA-050)
+        else if (id === 'ZA-020' || id === 'ZA-035' || id === 'ZA-050') {
+          status = 'LOCKED';
+          attention = { severity: 'WARNING', title: 'Tạm khóa theo yêu cầu bảo mật thông tin' };
         }
-      });
-    });
-
-    let alertCount = 0;
-    if (pendingOverdue.length > 0) alertCount++;
-    if (terminatedWithAcc.length > 0) alertCount++;
-    if (highestUtilBranch && highestUtilBranch.utilization >= 88) alertCount++;
-    if (idleQuotaBranch) alertCount++;
-
-    return `
-      <section class="overview-action-hub">
-        <div class="action-hub-header">
-          <div class="action-hub-title-wrap">
-            <div class="action-hub-icon">⚡</div>
-            <div>
-              <div class="action-hub-title">
-                <span>Việc Quan Trọng Cần Xử Lý</span>
-                <span class="action-hub-badge">${alertCount} cảnh báo</span>
-              </div>
-              <div class="action-hub-subtitle">
-                Cảnh báo nghiệp vụ Super Admin cần nắm bắt. Nhấp trực tiếp vào bất kỳ thẻ nào để chuyển ngay tới khu vực xử lý.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="action-hub-grid">
-          <!-- Cảnh báo 1: Pending quá hạn -->
-          <div class="action-card-item warn-critical" data-hub-link="pending" title="Nhấp để chuyển tới danh sách tài khoản Chờ kích hoạt quá hạn">
-            <div class="action-card-top">
-              <span class="action-card-icon">⏳</span>
-              <div class="action-card-info">
-                <div class="action-card-label flex-between">
-                  <span>Tài khoản Chờ kích hoạt quá hạn (>24h)</span>
-                  <span class="action-card-link-badge">Xem danh sách ➔</span>
-                </div>
-                <div class="action-card-desc">
-                  Có <strong>${pendingOverdue.length} tài khoản</strong> đã cấp nhưng nhân sự chưa kích hoạt (quá 24h-48h). Quota đang bị chiếm dụng.
-                </div>
-              </div>
-            </div>
-            <div class="action-card-actions">
-              <button class="btn btn-outline btn-xs" id="btn-hub-remind-all-pending" title="Gửi nhắc nhở tự động">Nhắc nhở tất cả</button>
-              <button class="btn btn-primary btn-xs" id="btn-hub-view-pending">Xem chi tiết</button>
-            </div>
-          </div>
-
-          <!-- Cảnh báo 2: Nghỉ việc chưa thu hồi -->
-          <div class="action-card-item warn-critical" data-hub-link="terminated" title="Nhấp để xử lý thu hồi tài khoản nhân sự nghỉ việc">
-            <div class="action-card-top">
-              <span class="action-card-icon">🚨</span>
-              <div class="action-card-info">
-                <div class="action-card-label flex-between">
-                  <span>Nhân sự nghỉ việc chưa thu hồi tài khoản</span>
-                  <span class="action-card-link-badge">Xử lý ngay ➔</span>
-                </div>
-                <div class="action-card-desc">
-                  Phát hiện <strong>${terminatedWithAcc.length} nhân sự thôi việc</strong> nhưng tài khoản Zalo vẫn mở. Cần thu hồi gấp để bảo vệ khách hàng.
-                </div>
-              </div>
-            </div>
-            <div class="action-card-actions">
-              <button class="btn btn-danger btn-xs" id="btn-hub-view-terminated">Xử lý thu hồi ngay</button>
-            </div>
-          </div>
-
-          <!-- Cảnh báo 3: Chạm trần Quota chi nhánh -->
-          <div class="action-card-item warn-medium" data-hub-link="allocation" title="Nhấp để chuyển tới màn hình Phân bổ Quota chi nhánh">
-            <div class="action-card-top">
-              <span class="action-card-icon">📊</span>
-              <div class="action-card-info">
-                <div class="action-card-label flex-between">
-                  <span>Chi nhánh ${highestUtilBranch ? highestUtilBranch.branchName : 'HCM-01'} sắp hết Quota (${highestUtilBranch ? highestUtilBranch.utilization : 92}%)</span>
-                  <span class="action-card-link-badge">Phân bổ thêm ➔</span>
-                </div>
-                <div class="action-card-desc">
-                  Chi nhánh đã sử dụng <strong>${highestUtilBranch ? highestUtilBranch.inUse : 138}/${highestUtilBranch ? highestUtilBranch.totalQuota : 150} Quota</strong>. Chỉ còn trống <strong>${highestUtilBranch ? highestUtilBranch.available : 12} Quota</strong> sẵn sàng.
-                </div>
-              </div>
-            </div>
-            <div class="action-card-actions">
-              <button class="btn btn-outline btn-xs" id="btn-hub-view-allocation">Phân bổ thêm Quota</button>
-            </div>
-          </div>
-
-          <!-- Cảnh báo 4: Thu hồi Quota nhàn rỗi -->
-          ${idleQuotaBranch ? `
-            <div class="action-card-item warn-info" data-hub-link="recall" title="Nhấp để thu hồi Quota nhàn rỗi về Quỹ dự phòng công ty">
-              <div class="action-card-top">
-                <span class="action-card-icon">🔄</span>
-                <div class="action-card-info">
-                  <div class="action-card-label flex-between">
-                    <span>${idleQuotaBranch.branchName} có Quota nhàn rỗi (${idleQuotaBranch.available} trống)</span>
-                    <span class="action-card-link-badge">Thu hồi về quỹ ➔</span>
-                  </div>
-                  <div class="action-card-desc">
-                    Tỷ lệ sử dụng thấp (${idleQuotaBranch.utilization}%). Có thể thu hồi 10 Quota nhàn rỗi trả về Quỹ dự phòng Super Admin.
-                  </div>
-                </div>
-              </div>
-              <div class="action-card-actions">
-                <button class="btn btn-outline btn-xs btn-warn" id="btn-hub-view-recall">Thu hồi về quỹ</button>
-              </div>
-            </div>
-          ` : ''}
-        </div>
-      </section>
-    `;
-  }
-
-  function renderOverviewView(container) {
-    const summary = getSystemSummary();
-    const isBranchAdmin = state.currentPersona === 'branch_admin';
-
-    let html = `
-      <div class="view-header">
-        <div class="view-title-group">
-          <div class="title-with-pill">
-            <h1 class="view-page-title">${isBranchAdmin ? 'Tổng quan Quota Chi nhánh' : 'Tổng quan Quota Vùng'}</h1>
-            <span class="scope-pill-badge">${summary.scopeName}</span>
-          </div>
-          <p class="view-page-desc">
-            Theo dõi phân bổ Quota Zalo Enterprise, tỷ lệ sử dụng và phát hiện kịp thời các rủi ro vận hành.
-          </p>
-        </div>
-        <div class="view-header-actions">
-          ${isBranchAdmin ? '' : `
-            <select class="filter-select-sm" id="overview-region-select">
-              <option value="ALL" ${state.overviewFilters.region === 'ALL' ? 'selected' : ''}>Tất cả các Vùng</option>
-              <option value="South" ${state.overviewFilters.region === 'South' ? 'selected' : ''}>Miền Nam</option>
-              <option value="Central" ${state.overviewFilters.region === 'Central' ? 'selected' : ''}>Miền Trung</option>
-              <option value="North" ${state.overviewFilters.region === 'North' ? 'selected' : ''}>Miền Bắc</option>
-            </select>
-          `}
-          <button class="btn btn-outline btn-sm" id="btn-refresh-overview" title="Tải lại số liệu">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23 4 23 10 17 10"></polyline>
-              <polyline points="1 20 1 14 7 14"></polyline>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-            </svg>
-            <span>Làm mới</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Trung Tâm Cảnh Báo & Việc Cần Làm Cho Super Admin (Action Hub) -->
-      ${renderOverviewActionHub(isBranchAdmin, summary)}
-
-      <section class="kpi-grid">
-        ${!isBranchAdmin ? `
-          <!-- Card 1: Tổng Hợp Đồng Toàn Quốc -->
-          <div class="kpi-card" data-kpi-link="quota_allocation" title="Bấm để xem Phân bổ Quota chi nhánh">
-            <div class="kpi-label">Tổng Hợp Đồng Toàn Quốc</div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono">${(summary.totalCompanyQuota || 1200).toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Đã cấp: <strong>${summary.totalAllocated.toLocaleString('vi-VN')}</strong> • Quỹ: <strong>${summary.companyReserve}</strong> Quota</span>
-              <span class="action-card-link-badge">Phân bổ ➔</span>
-            </div>
-          </div>
-
-          <!-- Card 2: Quỹ Dự Phòng Super Admin Giữ -->
-          <div class="kpi-card" data-kpi-link="quota_allocation" title="Bấm để phân bổ Quota từ Quỹ dự phòng cho các chi nhánh">
-            <div class="kpi-label">Quỹ Dự Phòng Super Admin</div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono num-green">${summary.companyReserve.toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Khả dụng cấp thêm ngay</span>
-              <span class="action-card-link-badge">Cấp thêm ➔</span>
-            </div>
-          </div>
-
-          <!-- Card 3: Thực Tế Đang Sử Dụng -->
-          <div class="kpi-card" data-kpi-link="quota_active" title="Bấm để xem danh sách tài khoản Đang hoạt động">
-            <div class="kpi-label-between">
-              <span class="kpi-label">Thực Tế Đang Sử Dụng</span>
-              <span class="kpi-tag-pct">${summary.utilization}%</span>
-            </div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono">${summary.inUse.toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-progress-bar-wrap">
-              <div class="kpi-progress-fill" style="width: ${Math.min(100, summary.utilization)}%;"></div>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">${summary.active || 912} Active • ${summary.pending || 16} Pending • ${summary.suspended || 38} Khóa</span>
-            </div>
-          </div>
-
-          <!-- Card 4: Quota Còn Trống Tại Chi Nhánh -->
-          <div class="kpi-card" data-kpi-link="quota_unassigned" title="Bấm để xem Quota còn trống tại các chi nhánh">
-            <div class="kpi-label">Còn Trống Tại Chi Nhánh</div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono text-primary">${summary.available.toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Chi nhánh tự cấp phát</span>
-              <span class="action-card-link-badge">Kho Quota ➔</span>
-            </div>
-          </div>
-
-          <!-- Card 5: Cảnh Báo Cần Chú Ý -->
-          <div class="kpi-card ${summary.attention > 0 ? 'kpi-card-attention' : ''}" data-kpi-link="quota_attention" title="Bấm để xử lý các cảnh báo an toàn và rủi ro Quota">
-            <div class="kpi-label-between">
-              <span class="kpi-label">Cảnh Báo Cần Chú Ý</span>
-              <span class="kpi-alert-icon">⚠</span>
-            </div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono num-orange">${summary.attention.toLocaleString('vi-VN')}</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Quá hạn, nghỉ việc, chạm trần</span>
-              <span class="action-card-link-badge">Xử lý ngay ➔</span>
-            </div>
-          </div>
-        ` : `
-          <!-- Branch Admin Mode -->
-          <div class="kpi-card">
-            <div class="kpi-label">Hạn Mức Quota Được Cấp</div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono text-primary">${summary.totalQuota.toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Chi nhánh HCM-01</span>
-            </div>
-          </div>
-
-          <div class="kpi-card" data-kpi-link="quota_active">
-            <div class="kpi-label-between">
-              <span class="kpi-label">Đang Sử Dụng</span>
-              <span class="kpi-tag-pct">${summary.utilization}%</span>
-            </div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono">${summary.inUse.toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-progress-bar-wrap">
-              <div class="kpi-progress-fill" style="width: ${Math.min(100, summary.utilization)}%;"></div>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">${summary.active || 0} Active • ${summary.pending || 0} Pending</span>
-            </div>
-          </div>
-
-          <div class="kpi-card" data-kpi-link="quota_unassigned">
-            <div class="kpi-label">Còn Trống Khả Dụng</div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono num-green">${summary.available.toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Sẵn sàng cấp cho nhân sự</span>
-            </div>
-          </div>
-
-          <div class="kpi-card" data-kpi-link="quota_suspended">
-            <div class="kpi-label">Tạm Khóa</div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono num-muted">${summary.suspended.toLocaleString('vi-VN')} Quota</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Chờ rà soát mở lại</span>
-            </div>
-          </div>
-
-          <div class="kpi-card ${summary.attention > 0 ? 'kpi-card-attention' : ''}" data-kpi-link="quota_attention">
-            <div class="kpi-label-between">
-              <span class="kpi-label">Cần Chú Ý</span>
-              <span class="kpi-alert-icon">⚠</span>
-            </div>
-            <div class="kpi-number-row">
-              <span class="kpi-big-num font-mono num-orange">${summary.attention.toLocaleString('vi-VN')}</span>
-            </div>
-            <div class="kpi-footer-row">
-              <span class="kpi-footer-sub">Yêu cầu xử lý</span>
-            </div>
-          </div>
-        `}
-      </section>
-    `;
-
-    if (isBranchAdmin) {
-      html += `
-        <div class="branch-overview-jump-card">
-          <div class="jump-card-content">
-            <h3>Quản lý Tài khoản & Nhân sự Chi nhánh HCM-01</h3>
-            <p>Chi nhánh hiện có <strong>${summary.available} Quota trống</strong> sẵn sàng cấp phát. Có <strong>${summary.attention} nhân sự/account</strong> đang có cảnh báo rủi ro cần xử lý.</p>
-          </div>
-          <button class="btn btn-primary" id="btn-jump-to-quota">
-            <span>Mở danh sách Nhân viên & Tài khoản</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-          </button>
-        </div>
-      `;
-    } else {
-      const branchesData = [];
-      for (const r of state.orgTree.regions) {
-        if (state.overviewFilters.region !== 'ALL' && r.id !== state.overviewFilters.region) continue;
-        for (const b of r.branches) {
-          const stats = getBranchQuotaStats(b.id);
-          if (state.overviewFilters.search) {
-            const q = state.overviewFilters.search.toLowerCase();
-            if (!stats.branchName.toLowerCase().includes(q) && !stats.branchId.toLowerCase().includes(q)) {
-              continue;
-            }
-          }
-          branchesData.push(stats);
-        }
-      }
-
-      let sumTotal = 0, sumInUse = 0, sumAvailable = 0, sumSuspended = 0, sumAttention = 0;
-      branchesData.forEach(item => {
-        sumTotal += item.totalQuota;
-        sumInUse += item.inUse;
-        sumAvailable += item.available;
-        sumSuspended += item.suspended;
-        sumAttention += item.attention;
-      });
-      const avgUtil = sumTotal > 0 ? ((sumInUse / sumTotal) * 100).toFixed(1) : 0;
-
-      html += `
-        <section class="overview-table-card">
-          <div class="table-card-header">
-            <div class="table-card-titles">
-              <h2 class="table-card-title">Phân bổ Quota theo Đơn vị</h2>
-              <span class="table-card-desc">Chi tiết chỉ tiêu và thực trạng khai thác Quota trên từng chi nhánh trực thuộc</span>
-            </div>
-            <div class="table-card-filters">
-              <div class="table-search-box">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
-                <input type="text" class="input-sm" id="overview-branch-search" 
-                       placeholder="Tìm chi nhánh..." value="${escapeHtml(state.overviewFilters.search)}">
-              </div>
-              <button class="btn btn-outline btn-xs" id="btn-reset-overview-filters">Đặt lại</button>
-            </div>
-          </div>
-
-          <div class="table-responsive">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width: 100px;">VÙNG</th>
-                  <th style="width: 220px;">CHI NHÁNH</th>
-                  <th style="width: 110px; text-align: right;">TỔNG QUOTA</th>
-                  <th style="width: 110px; text-align: right;">ĐANG DÙNG</th>
-                  <th style="width: 110px; text-align: right;">CHƯA DÙNG</th>
-                  <th style="width: 110px; text-align: right;">TẠM KHÓA</th>
-                  <th style="width: 120px; text-align: center;">CẦN CHÚ Ý</th>
-                  <th style="width: 160px;">TỶ LỆ SỬ DỤNG</th>
-                  <th style="width: 120px; text-align: right;">THAO TÁC</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${branchesData.map(b => `
-                  <tr class="table-row-clickable" data-branch-jump="${b.branchId}">
-                    <td><span class="region-tag">${b.regionId}</span></td>
-                    <td>
-                      <div class="branch-name-cell">
-                        <strong>${escapeHtml(b.branchName)}</strong>
-                        <span class="branch-code-badge">${b.branchId}</span>
-                      </div>
-                    </td>
-                    <td style="text-align: right;"><strong>${b.totalQuota}</strong></td>
-                    <td style="text-align: right;">${b.inUse}</td>
-                    <td style="text-align: right;"><span class="num-green font-semibold">${b.available}</span></td>
-                    <td style="text-align: right;"><span class="num-red">${b.suspended}</span></td>
-                    <td style="text-align: center;">
-                      ${b.attention > 0 ? `
-                        <span class="attention-pill-badge">
-                          <span class="dot-orange">●</span> ${b.attention}
-                        </span>
-                      ` : `<span class="text-muted">—</span>`}
-                    </td>
-                    <td>
-                      <div class="utilization-cell">
-                        <span class="util-num">${b.utilization}%</span>
-                        <div class="mini-progress-track">
-                          <div class="mini-progress-bar" style="width: ${Math.min(100, b.utilization)}%;"></div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style="text-align: right;">
-                      <button class="btn-link-action" data-branch-jump="${b.branchId}">
-                        <span>Xem danh sách</span> ➔
-                      </button>
-                    </td>
-                  </tr>
-                `).join('')}
-
-                <tr class="table-row-total">
-                  <td colspan="2"><strong>Tổng cộng (${branchesData.length} Chi nhánh)</strong></td>
-                  <td style="text-align: right;"><strong>${sumTotal}</strong></td>
-                  <td style="text-align: right;"><strong>${sumInUse}</strong></td>
-                  <td style="text-align: right;"><strong class="num-green">${sumAvailable}</strong></td>
-                  <td style="text-align: right;"><strong class="num-red">${sumSuspended}</strong></td>
-                  <td style="text-align: center;"><strong class="num-orange">${sumAttention}</strong></td>
-                  <td><strong>${avgUtil}% Trung bình</strong></td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="table-card-footer">
-            <span class="footer-count-text">Hiển thị <strong>${branchesData.length}</strong> chi nhánh trên toàn hệ thống</span>
-          </div>
-        </section>
-      `;
-    }
-
-    html += `
-      <div class="callout-box">
-        <div class="callout-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-          </svg>
-        </div>
-        <div class="callout-content">
-          <div class="callout-title">Quy chuẩn Quản trị Quota Zalo Enterprise</div>
-          <p class="callout-desc">
-            Hệ thống hỗ trợ quản lý tập trung tài khoản Zalo Enterprise theo từng chi nhánh. Khi nhân sự thôi việc, quản trị viên có thể bàn giao tài khoản hoặc thu hồi về kho lưu trữ để bảo tồn danh bạ khách hàng.
-          </p>
-        </div>
-      </div>
-    `;
-
-    container.innerHTML = html;
-
-    const regSelect = document.getElementById('overview-region-select');
-    if (regSelect) {
-      regSelect.addEventListener('change', (e) => {
-        state.overviewFilters.region = e.target.value;
-        saveState();
-        renderApp();
-      });
-    }
-
-    const searchInput = document.getElementById('overview-branch-search');
-    if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
-        state.overviewFilters.search = e.target.value;
-        renderApp();
-      });
-    }
-
-    const resetBtn = document.getElementById('btn-reset-overview-filters');
-    if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
-        state.overviewFilters.search = '';
-        state.overviewFilters.region = 'ALL';
-        saveState();
-        renderApp();
-      });
-    }
-
-    // Hub Action Listeners trên cả Card và Buttons (Ấn vào link tới đó ngay)
-    container.querySelectorAll('[data-hub-link]').forEach(card => {
-      card.addEventListener('click', (e) => {
-        if (e.target.closest('#btn-hub-remind-all-pending')) return;
-
-        const link = card.getAttribute('data-hub-link');
-        if (link === 'pending') {
-          state.activeView = 'quota';
-          state.quotaFilters.activeTab = 'PENDING';
-          state.quotaFilters.advAttentionType = 'OVERDUE';
-          saveState();
-          renderApp();
-          showToast('Đang hiển thị danh sách tài khoản Chờ kích hoạt quá hạn (>24h)', 'info');
-        } else if (link === 'terminated') {
-          state.activeView = 'quota';
-          state.quotaFilters.activeTab = 'ATTENTION';
-          state.quotaFilters.advAttentionType = 'TERMINATED';
-          saveState();
-          renderApp();
-          showToast('Đang hiển thị danh sách nhân sự thôi việc cần thu hồi tài khoản', 'info');
-        } else if (link === 'allocation' || link === 'recall') {
-          state.activeView = 'quota_allocation';
-          saveState();
-          renderApp();
-          showToast('Đã chuyển tới Màn hình Phân bổ Quota chi nhánh', 'info');
-        }
-      });
-    });
-
-    const btnHubRemindPending = document.getElementById('btn-hub-remind-all-pending');
-    if (btnHubRemindPending) {
-      btnHubRemindPending.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const pendingOverdue = state.employees.filter(e => e.accountStatus === 'Pending' && e.pendingOverdue);
-        if (pendingOverdue.length === 0) {
-          showToast('Không có tài khoản Chờ kích hoạt nào bị quá hạn', 'info');
-          return;
+        // Realistic Operational Attention items on ACTIVE accounts (5 items)
+        else if (id === 'ZA-015' || id === 'ZA-022') {
+          status = 'ACTIVE';
+          attention = { severity: 'CRITICAL', title: 'Nhân viên đã nghỉ việc nhưng tài khoản vẫn hoạt động' };
+        } else if (id === 'ZA-041') {
+          status = 'ACTIVE';
+          attention = { severity: 'WARNING', title: 'Nhân viên đã chuyển chi nhánh nhưng tài khoản chưa xử lý' };
+        } else if (id === 'ZA-028') {
+          status = 'ACTIVE';
+          attention = { severity: 'WARNING', title: 'Đăng nhập từ IP/vị trí bất thường' };
+        } else if (id === 'ZA-065') {
+          status = 'ACTIVE';
+          attention = { severity: 'INFO', title: 'Tài khoản không phát sinh tương tác quá 30 ngày' };
         }
 
-        pendingOverdue.forEach(emp => {
-          state.auditLogs.unshift({
-            id: `LOG-${Date.now().toString().slice(-4)}`,
-            timestamp: '25/09/2026 14:20',
-            actor: getActorName(),
-            action: 'Nhắc nhở kích hoạt tài khoản',
-            target: `${emp.name} (${emp.accountId})`,
-            branch: `${emp.branchName} (${emp.branchId})`,
-            impact: `Gửi email/SMS đôn đốc kích hoạt tài khoản Zalo Enterprise (đã cấp ${emp.pendingHours || 24}h)`
-          });
+        accounts.push({
+          id,
+          username: isBaDinhUnassigned ? `zalo_${id.toLowerCase()}` : username,
+          ownerName: isBaDinhUnassigned ? null : empName,
+          displayName: isBaDinhUnassigned ? null : displayName,
+          ownerEmail: isBaDinhUnassigned ? null : empEmail,
+          empCode: isBaDinhUnassigned ? null : empCode,
+          empDept: isBaDinhUnassigned ? null : empDept,
+          empPhone: isBaDinhUnassigned ? null : empPhone,
+          empStatus: isBaDinhUnassigned ? null : 'Chính thức',
+          region: region.name,
+          branch: branch.name,
+          createdDate: '15/08/2026',
+          assignedDate: isBaDinhUnassigned ? null : '20/08/2026',
+          status,
+          attention,
+          isReclaimed: false,
+          ownershipHistory: [],
+          history: isBaDinhUnassigned ? [] : [
+            { from: 'Kho trung tâm (Zalo)', to: empName, date: '20/08/2026 09:00', by: 'Super Admin' }
+          ]
         });
+      }
+    });
+  });
 
-        saveState();
-        showToast(`Đã gửi thông báo nhắc nhở thành công tới ${pendingOverdue.length} nhân sự quá hạn kích hoạt`, 'success');
-        renderApp();
+  // 2. Kho trung tâm accounts: 30 accounts (ZA-071 -> ZA-100)
+  while (seq <= 100) {
+    const id = fmtId(seq++);
+    const isZa71 = id === 'ZA-071';
+    accounts.push({
+      id,
+      username: `zalo_${id.toLowerCase()}`,
+      ownerName: null,
+      displayName: null,
+      ownerEmail: null,
+      empCode: null,
+      empDept: null,
+      empPhone: null,
+      empStatus: null,
+      region: 'Toàn quốc',
+      branch: 'Kho trung tâm',
+      createdDate: '15/08/2026',
+      assignedDate: null,
+      status: 'UNASSIGNED',
+      attention: null,
+      isReclaimed: isZa71,
+      formerOwner: isZa71 ? {
+        name: 'Trần Văn Hùng',
+        email: 'hungtv8@fpt.com',
+        code: 'NV10321',
+        dept: 'Kinh doanh Khách hàng Cá nhân',
+        branch: 'Chi nhánh Ba Đình',
+        phone: '0981.234.567',
+        reclaimedDate: '26/09/2026 14:30',
+        reclaimedBy: 'Super Admin',
+        reason: 'Nhân sự nghỉ việc - Thu hồi tài khoản về Kho trung tâm'
+      } : null,
+      ownershipHistory: isZa71 ? [
+        {
+          generation: 2,
+          name: 'Trần Văn Hùng',
+          email: 'hungtv8@fpt.com',
+          code: 'NV10321',
+          dept: 'Kinh doanh Khách hàng Cá nhân',
+          branch: 'Chi nhánh Ba Đình',
+          phone: '0981.234.567',
+          fromDate: '15/08/2026',
+          toDate: '26/09/2026',
+          reclaimedDate: '26/09/2026 14:30',
+          reclaimedBy: 'Super Admin',
+          reason: 'Nhân sự nghỉ việc'
+        },
+        {
+          generation: 1,
+          name: 'Phạm Hồng Đăng',
+          email: 'dangph@fpt.com',
+          code: 'NV10105',
+          dept: 'Phát triển Khách hàng',
+          branch: 'Chi nhánh Ba Đình',
+          phone: '0983.567.890',
+          fromDate: '01/01/2026',
+          toDate: '14/08/2026',
+          reclaimedDate: '14/08/2026 17:00',
+          reclaimedBy: 'Super Admin',
+          reason: 'Điều chuyển công tác sang đơn vị khác'
+        }
+      ] : [],
+      history: isZa71 ? [
+        { from: 'Trần Văn Hùng (Chi nhánh Ba Đình)', to: 'Kho trung tâm (Thu hồi)', date: '26/09/2026 14:30', by: 'Super Admin' },
+        { from: 'Kho trung tâm', to: 'Trần Văn Hùng', date: '15/08/2026 09:00', by: 'Super Admin' }
+      ] : []
+    });
+  }
+
+  AppState.accounts = accounts;
+}
+
+// Compute metrics dynamically from current state (CR-001 exact numbers)
+function getMetrics() {
+  const accounts = AppState.accounts;
+  const total = accounts.length; // 100
+  const centralPool = accounts.filter(a => a.branch === 'Kho trung tâm').length; // 30
+  const allocated = total - centralPool; // 70
+  
+  const active = accounts.filter(a => a.status === 'ACTIVE').length; // 60
+  const pending = accounts.filter(a => a.status === 'PENDING').length; // 3
+  const locked = accounts.filter(a => a.status === 'LOCKED').length; // 3
+  const attention = accounts.filter(a => a.attention !== null).length; // 8
+
+  const assigned = accounts.filter(a => a.branch !== 'Kho trung tâm' && a.ownerName !== null).length;
+  // UNASSIGNED tại chi nhánh = accounts ở branch thực mà chưa có ownerName (không tính Kho TT)
+  const unassignedInBranch = accounts.filter(a => a.branch !== 'Kho trung tâm' && (a.ownerName === null || a.status === 'UNASSIGNED')).length; // 4
+  const unassignedTotal = centralPool + unassignedInBranch; // 34
+  
+  const utilizationRate = allocated > 0 ? Math.round((active / allocated) * 100) : 0;
+
+  return {
+    total,
+    centralPool,
+    allocated,
+    assigned,
+    unassignedInBranch,
+    unassigned: unassignedTotal,
+    totalUnassignedOnTable: unassignedTotal,
+    active,
+    pending,
+    locked,
+    attention,
+    utilizationRate
+  };
+}
+
+// Compute scoped metrics based on active role (Super Admin vs Branch Admin)
+function getRoleScopedMetrics() {
+  const isBranchAdmin = AppState.currentRole === 'BRANCH_ADMIN';
+  const branchScope = AppState.activeBranchScope;
+
+  if (isBranchAdmin) {
+    const branchAccounts = AppState.accounts.filter(a => a.branch === branchScope);
+    const total = branchAccounts.length; // 8 for Ba Đình
+    const active = branchAccounts.filter(a => a.status === 'ACTIVE').length; // 6
+    const pending = branchAccounts.filter(a => a.status === 'PENDING').length; // 1 (ZA-003)
+    const locked = branchAccounts.filter(a => a.status === 'LOCKED').length; // 0
+    const unassigned = branchAccounts.filter(a => a.ownerName === null || a.status === 'UNASSIGNED').length; // 1
+    const attention = branchAccounts.filter(a => a.attention !== null).length; // 1
+    const utilizationRate = total > 0 ? Math.round((active / total) * 100) : 0; // 75%
+
+    return {
+      isBranchAdmin: true,
+      total,
+      centralPool: 0,
+      allocated: total,
+      assigned: active,
+      unassignedInBranch: unassigned,
+      unassigned,
+      active,
+      pending,
+      locked,
+      attention,
+      utilizationRate
+    };
+  }
+
+  // Super Admin view (Enterprise wide)
+  return {
+    isBranchAdmin: false,
+    ...getMetrics()
+  };
+}
+
+// Recalculate branch & region assigned/unassigned counts
+function recalculateRegionCounts() {
+  AppState.regions.forEach(region => {
+    let regQuota = 0;
+    region.branches.forEach(branch => {
+      const branchAccounts = AppState.accounts.filter(a => a.branch === branch.name);
+      branch.quota = branchAccounts.length;
+      branch.assigned = branchAccounts.filter(a => a.ownerName !== null).length;
+      branch.unassigned = branchAccounts.filter(a => a.ownerName === null).length;
+      regQuota += branch.quota;
+    });
+    region.quota = regQuota;
+  });
+}
+
+// Navigation View Switcher
+function switchView(viewName) {
+  AppState.currentView = viewName;
+
+  document.querySelectorAll('.view-section').forEach(sec => sec.classList.add('hidden'));
+  const targetView = document.getElementById(`view-${viewName}`);
+  if (targetView) targetView.classList.remove('hidden');
+
+  // Update nav links active styling
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    if (btn.getAttribute('data-view') === viewName) {
+      btn.classList.add('bg-surface-container-high', 'text-primary', 'border-l-2', 'border-primary', 'font-title-sm');
+      btn.classList.remove('text-on-surface-variant');
+    } else {
+      btn.classList.remove('bg-surface-container-high', 'text-primary', 'border-l-2', 'border-primary', 'font-title-sm');
+      btn.classList.add('text-on-surface-variant');
+    }
+  });
+
+  // Render content of active view
+  if (viewName === 'overview') switchView('quotas');
+  else if (viewName === 'accounts') renderAccounts();
+  else if (viewName === 'quotas') renderQuotas();
+  else if (viewName === 'audit') renderAudit();
+}
+
+// Render Overview View (Redirects to Quotas & Accounts after merging views)
+function renderOverview() {
+  renderQuotas();
+  renderAccounts();
+}
+
+// Navigate to Accounts view with specific filter
+function navigateToFilter(tabStatus, accountIdToHighlight = null) {
+  AppState.accountFilters.status = tabStatus;
+  AppState.accountFilters.search = '';
+  AppState.accountFilters.region = 'all';
+  AppState.accountFilters.branch = 'all';
+  switchView('accounts');
+
+  if (accountIdToHighlight) {
+    setTimeout(() => {
+      openDrawer(accountIdToHighlight);
+    }, 150);
+  }
+}
+
+// Triggered by "Áp dụng" filter button or Search Enter
+function applyAccountFilters() {
+  const searchInput = document.getElementById('acc-search-input');
+  const regionSel = document.getElementById('acc-filter-region');
+  const branchSel = document.getElementById('acc-filter-branch');
+
+  if (searchInput) AppState.accountFilters.search = searchInput.value;
+  if (regionSel && AppState.currentRole === 'SUPER_ADMIN') AppState.accountFilters.region = regionSel.value;
+  if (branchSel && AppState.currentRole === 'SUPER_ADMIN') AppState.accountFilters.branch = branchSel.value;
+
+  renderAccounts();
+}
+
+// Render Accounts View & Table (CR-001)
+function renderAccounts() {
+  const metrics = getRoleScopedMetrics();
+  const isBranchAdmin = metrics.isBranchAdmin;
+
+  // 1. Update Top KPI Overview Cards based on Role Scope
+  const kpiTotalLabel = document.getElementById('acc-kpi-total-label');
+  const kpiTotalSub = document.getElementById('acc-kpi-total-sub');
+  const kpiCentralLabel = document.getElementById('acc-kpi-central-label');
+  const kpiCentralSub = document.getElementById('acc-kpi-central-sub');
+  const kpiActiveLabel = document.getElementById('acc-kpi-active-label');
+  const kpiActiveSub = document.getElementById('acc-kpi-active-sub');
+
+  if (isBranchAdmin) {
+    if (kpiTotalLabel) kpiTotalLabel.innerText = 'Hạn ngạch chi nhánh';
+    if (kpiTotalSub) kpiTotalSub.innerText = AppState.activeBranchScope;
+    if (kpiCentralLabel) kpiCentralLabel.innerText = 'Chưa gán (Khả dụng)';
+    if (kpiCentralSub) kpiCentralSub.innerText = 'Sẵn sàng gán';
+    if (kpiActiveLabel) kpiActiveLabel.innerText = 'Đang hoạt động';
+    if (kpiActiveSub) kpiActiveSub.innerText = 'Đã gán nhân viên';
+  } else {
+    if (kpiTotalLabel) kpiTotalLabel.innerText = 'Tổng tài khoản';
+    if (kpiTotalSub) kpiTotalSub.innerText = 'Toàn doanh nghiệp';
+    if (kpiCentralLabel) kpiCentralLabel.innerText = 'Chưa phân bổ';
+    if (kpiCentralSub) kpiCentralSub.innerText = 'Kho trung tâm';
+    if (kpiActiveLabel) kpiActiveLabel.innerText = 'Đang hoạt động';
+    if (kpiActiveSub) kpiActiveSub.innerText = 'Đã gán nhân viên';
+  }
+
+  const kpiTotal = document.getElementById('acc-kpi-total');
+  if (kpiTotal) kpiTotal.innerText = metrics.total;
+  const kpiCentral = document.getElementById('acc-kpi-central');
+  if (kpiCentral) kpiCentral.innerText = metrics.unassigned;
+  const kpiActive = document.getElementById('acc-kpi-active');
+  if (kpiActive) kpiActive.innerText = metrics.active;
+  const kpiPending = document.getElementById('acc-kpi-pending');
+  if (kpiPending) kpiPending.innerText = metrics.pending;
+  const kpiLocked = document.getElementById('acc-kpi-locked');
+  if (kpiLocked) kpiLocked.innerText = metrics.locked;
+
+  // 1b. Update Gauge Bar (Visual Usage Ratio)
+  const gaugeRatio = document.getElementById('acc-gauge-ratio');
+  if (gaugeRatio) {
+    gaugeRatio.innerText = isBranchAdmin 
+      ? `${metrics.active} / ${metrics.total} tài khoản chi nhánh`
+      : `${metrics.active} / ${metrics.allocated} tài khoản cấp đơn vị`;
+  }
+  const gaugePercent = document.getElementById('acc-gauge-percent');
+  if (gaugePercent) gaugePercent.innerText = `${metrics.utilizationRate}%`;
+
+  const barActive = document.getElementById('acc-gauge-bar-active');
+  const barPending = document.getElementById('acc-gauge-bar-pending');
+  const barLocked = document.getElementById('acc-gauge-bar-locked');
+  const barBranchUnassigned = document.getElementById('acc-gauge-bar-branch-unassigned');
+  const barCentral = document.getElementById('acc-gauge-bar-central');
+
+  if (isBranchAdmin) {
+    const totalCount = metrics.total || 1;
+    if (barActive) barActive.style.width = `${(metrics.active / totalCount) * 100}%`;
+    if (barPending) barPending.style.width = `${(metrics.pending / totalCount) * 100}%`;
+    if (barLocked) barLocked.style.width = `${(metrics.locked / totalCount) * 100}%`;
+    if (barBranchUnassigned) barBranchUnassigned.style.width = `${(metrics.unassigned / totalCount) * 100}%`;
+    if (barCentral) barCentral.style.width = `0%`; // Hide central pool for branch admin
+  } else {
+    if (barActive) barActive.style.width = `${metrics.active}%`;
+    if (barPending) barPending.style.width = `${metrics.pending}%`;
+    if (barLocked) barLocked.style.width = `${metrics.locked}%`;
+    if (barBranchUnassigned) barBranchUnassigned.style.width = `${metrics.unassignedInBranch}%`;
+    if (barCentral) barCentral.style.width = `${metrics.centralPool}%`;
+  }
+
+  // Update Sublegend
+  const subActive = document.getElementById('acc-sublegend-active');
+  if (subActive) subActive.innerText = metrics.active;
+  const subPending = document.getElementById('acc-sublegend-pending');
+  if (subPending) subPending.innerText = metrics.pending;
+  const subLocked = document.getElementById('acc-sublegend-locked');
+  if (subLocked) subLocked.innerText = metrics.locked;
+  
+  const subBranchUnassigned = document.getElementById('acc-sublegend-branch-unassigned');
+  if (subBranchUnassigned) subBranchUnassigned.innerText = isBranchAdmin ? metrics.unassigned : metrics.unassignedInBranch;
+
+  const subFifthLabel = document.getElementById('acc-sublegend-fifth-label');
+  if (subFifthLabel) {
+    if (isBranchAdmin) {
+      subFifthLabel.parentElement.classList.remove('hidden'); // Ensure visible
+    }
+  }
+
+  const subFourthLabel = document.getElementById('acc-sublegend-fourth-label');
+  if (subFourthLabel) {
+    if (isBranchAdmin) {
+      subFourthLabel.parentElement.classList.add('hidden'); // Hide Kho trung tâm for branch admin
+    } else {
+      subFourthLabel.parentElement.classList.remove('hidden');
+      subFourthLabel.innerHTML = `Kho trung tâm: <strong id="acc-sublegend-central" class="text-slate-700">${metrics.centralPool}</strong>`;
+    }
+  }
+
+  const subTotal = document.getElementById('acc-sublegend-total');
+  if (subTotal) {
+    subTotal.innerText = isBranchAdmin ? `Tổng: ${metrics.total}` : 'Tổng: 100';
+  }
+
+  // 1c. Update Top Right Attention Notification List (Scoped by Role)
+  const attentionAccounts = isBranchAdmin
+    ? AppState.accounts.filter(a => a.branch === AppState.activeBranchScope && a.attention !== null)
+    : AppState.accounts.filter(a => a.attention !== null);
+
+  const attentionBadge = document.getElementById('acc-attention-count-badge');
+  if (attentionBadge) attentionBadge.innerText = `${attentionAccounts.length} ưu tiên`;
+
+  const attentionList = document.getElementById('acc-attention-list');
+  if (attentionList) {
+    attentionList.innerHTML = '';
+    const topAttentions = attentionAccounts.slice(0, 4);
+    if (topAttentions.length === 0) {
+      attentionList.innerHTML = '<div class="py-3 text-center text-slate-400 text-xs italic">Không có tài khoản nào cần chú ý trong phạm vi chi nhánh</div>';
+    } else {
+      topAttentions.forEach(acc => {
+        const isCrit = acc.attention.severity === 'CRITICAL';
+        let typeBadge = 'Cảnh báo';
+        let badgeStyle = 'bg-amber-100 text-amber-900 border-amber-300';
+        if (isCrit) {
+          typeBadge = 'Nghỉ việc';
+          badgeStyle = 'bg-red-100 text-red-800 border-red-300 font-bold';
+        } else if (acc.status === 'PENDING') {
+          typeBadge = 'Chưa kích hoạt';
+          badgeStyle = 'bg-amber-100 text-amber-900 border-amber-300';
+        } else if (acc.status === 'LOCKED') {
+          typeBadge = 'Tạm khóa';
+          badgeStyle = 'bg-slate-200 text-slate-800 border-slate-300';
+        } else if (acc.attention.title.includes('IP')) {
+          typeBadge = 'IP lạ';
+          badgeStyle = 'bg-orange-100 text-orange-900 border-orange-300 font-bold';
+        } else if (acc.attention.title.includes('chi nhánh')) {
+          typeBadge = 'Chuyển đơn vị';
+          badgeStyle = 'bg-blue-100 text-blue-900 border-blue-300';
+        }
+
+        const item = document.createElement('div');
+        item.className = 'py-1.5 flex items-start justify-between gap-2 hover:bg-slate-50 cursor-pointer rounded px-1 transition-colors';
+        item.onclick = () => openDrawer(acc.id);
+        item.innerHTML = `
+          <div class="flex items-start gap-1.5 min-w-0 flex-1">
+            <span class="mt-0.5 inline-flex items-center px-1.5 py-0.2 rounded text-[10px] border shrink-0 ${badgeStyle}">${typeBadge}</span>
+            <div class="flex flex-col min-w-0">
+              <span class="text-[11px] text-on-surface font-medium leading-tight truncate" title="${acc.attention.title}">${acc.attention.title}</span>
+              <span class="text-[10px] text-slate-400 mt-0.5"><strong class="text-primary font-mono">${acc.id}</strong> • ${acc.ownerName || 'Chưa gán'} (${acc.branch})</span>
+            </div>
+          </div>
+          <button class="text-primary hover:text-primary-container text-[11px] font-semibold shrink-0" onclick="event.stopPropagation(); openDrawer('${acc.id}')">Xem</button>
+        `;
+        attentionList.appendChild(item);
       });
     }
+  }
 
-    // KPI Cards Direct Link Listeners
-    container.querySelectorAll('[data-kpi-link]').forEach(card => {
-      card.addEventListener('click', () => {
-        const link = card.getAttribute('data-kpi-link');
-        if (link === 'quota_allocation') {
-          state.activeView = 'quota_allocation';
-        } else if (link === 'quota_active') {
-          state.activeView = 'quota';
-          state.quotaFilters.activeTab = 'ACTIVE';
-        } else if (link === 'quota_unassigned') {
-          state.activeView = 'quota';
-          state.quotaFilters.activeTab = 'UNASSIGNED_POOL';
-        } else if (link === 'quota_suspended') {
-          state.activeView = 'quota';
-          state.quotaFilters.activeTab = 'SUSPENDED';
-        } else if (link === 'quota_attention') {
-          state.activeView = 'quota';
-          state.quotaFilters.activeTab = 'ATTENTION';
-        }
-        saveState();
-        renderApp();
+  // 2. Update Quick Status Tab Counts
+  document.getElementById('tab-count-all').innerText = metrics.total;
+  document.getElementById('tab-count-unassigned').innerText = metrics.unassigned;
+  document.getElementById('tab-count-active').innerText = metrics.active;
+  document.getElementById('tab-count-pending').innerText = metrics.pending;
+  document.getElementById('tab-count-locked').innerText = metrics.locked;
+  document.getElementById('tab-count-warning').innerText = metrics.attention;
+
+  const tabUnassignedLabel = document.getElementById('tab-unassigned-label');
+  if (tabUnassignedLabel) {
+    tabUnassignedLabel.innerText = isBranchAdmin ? 'Chưa gán' : 'Chưa phân bổ';
+  }
+
+  // Toggle Role Toolbar Elements
+  const regionFilterGroup = document.getElementById('acc-region-filter-group');
+  const branchScopeBadge = document.getElementById('acc-branch-scope-badge');
+  if (isBranchAdmin) {
+    if (regionFilterGroup) regionFilterGroup.classList.add('hidden');
+    if (branchScopeBadge) {
+      branchScopeBadge.classList.remove('hidden');
+      branchScopeBadge.classList.add('flex');
+    }
+  } else {
+    if (regionFilterGroup) regionFilterGroup.classList.remove('hidden');
+    if (branchScopeBadge) {
+      branchScopeBadge.classList.add('hidden');
+      branchScopeBadge.classList.remove('flex');
+    }
+  }
+
+  // Active tab style
+  document.querySelectorAll('.acc-tab-btn').forEach(btn => {
+    if (btn.getAttribute('data-filter') === AppState.accountFilters.status) {
+      btn.classList.add('border-primary', 'text-primary', 'font-semibold');
+      btn.classList.remove('border-transparent', 'text-on-surface-variant');
+    } else {
+      btn.classList.remove('border-primary', 'text-primary', 'font-semibold');
+      btn.classList.add('border-transparent', 'text-on-surface-variant');
+    }
+  });
+
+  // Filter accounts
+  let filtered = AppState.accounts.slice();
+
+  // Role scope limitation
+  if (AppState.currentRole === 'BRANCH_ADMIN') {
+    filtered = filtered.filter(a => a.branch === AppState.activeBranchScope);
+  }
+
+  // Quick tab filter
+  const curTab = AppState.accountFilters.status;
+  if (curTab === 'unassigned') {
+    filtered = filtered.filter(a => a.status === 'UNASSIGNED' || a.ownerName === null);
+    // Pin reclaimed accounts to top (CR-001)
+    filtered.sort((a, b) => (b.isReclaimed ? 1 : 0) - (a.isReclaimed ? 1 : 0));
+  } else if (curTab === 'active') {
+    filtered = filtered.filter(a => a.status === 'ACTIVE');
+  } else if (curTab === 'pending') {
+    filtered = filtered.filter(a => a.status === 'PENDING');
+  } else if (curTab === 'locked') {
+    filtered = filtered.filter(a => a.status === 'LOCKED');
+  } else if (curTab === 'warning') {
+    filtered = filtered.filter(a => a.attention !== null);
+  }
+
+  // Search filter
+  const s = AppState.accountFilters.search.toLowerCase().trim();
+  if (s) {
+    filtered = filtered.filter(a => 
+      a.id.toLowerCase().includes(s) ||
+      (a.ownerName && a.ownerName.toLowerCase().includes(s)) ||
+      (a.ownerEmail && a.ownerEmail.toLowerCase().includes(s)) ||
+      a.branch.toLowerCase().includes(s)
+    );
+  }
+
+  // Region filter (for Super Admin)
+  if (AppState.currentRole === 'SUPER_ADMIN' && AppState.accountFilters.region !== 'all') {
+    filtered = filtered.filter(a => a.region === AppState.accountFilters.region);
+  }
+
+  // Branch filter (for Super Admin)
+  if (AppState.currentRole === 'SUPER_ADMIN' && AppState.accountFilters.branch !== 'all') {
+    filtered = filtered.filter(a => a.branch === AppState.accountFilters.branch);
+  }
+
+  // Render Table Rows
+  const tbody = document.getElementById('accounts-table-body');
+  tbody.innerHTML = '';
+  document.getElementById('acc-visible-count').innerText = `${filtered.length} tài khoản`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="py-8 text-center text-on-surface-variant text-sm">
+          Không tìm thấy tài khoản phù hợp với điều kiện tìm kiếm/bộ lọc.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  filtered.forEach(acc => {
+    const tr = document.createElement('tr');
+    tr.className = `border-b border-outline-variant/30 hover:bg-sky-50/50 cursor-pointer transition-colors ${acc.isReclaimed ? 'bg-red-50/20' : ''}`;
+    tr.setAttribute('data-id', acc.id);
+    tr.onclick = (e) => {
+      if (e.target.closest('button')) return;
+      openDrawer(acc.id);
+    };
+
+    // Status pill helper (CR-001)
+    let statusPill = '';
+    if (acc.isReclaimed) {
+      statusPill = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-red-50 text-red-700 border border-red-200"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>Đã thu hồi</span>`;
+    } else if (acc.ownerName === null || acc.status === 'UNASSIGNED') {
+      statusPill = `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">Chưa phân bổ</span>`;
+    } else if (acc.status === 'ACTIVE') {
+      statusPill = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Đang hoạt động</span>`;
+    } else if (acc.status === 'PENDING') {
+      statusPill = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Chờ kích hoạt</span>`;
+    } else if (acc.status === 'LOCKED') {
+      statusPill = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-700 border border-slate-300">Tạm khóa</span>`;
+    }
+
+    // Attention badge helper — empty for normal accounts (no dash clutter)
+    let attentionCol = '';
+    if (acc.attention) {
+      const isCrit = acc.attention.severity === 'CRITICAL';
+      attentionCol = `
+        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold ${isCrit ? 'bg-red-100 text-red-800 border border-red-300' : 'bg-amber-100 text-amber-900 border border-amber-300'}" title="${acc.attention.title}">
+          <span class="material-symbols-outlined text-[13px]">${isCrit ? 'error' : 'warning'}</span>
+          <span>${acc.attention.title.length > 25 ? acc.attention.title.substring(0, 25) + '...' : acc.attention.title}</span>
+        </span>
+      `;
+    }
+
+    // 4 Action Icons for Table Row (CR-001)
+    let actionIcons = '';
+
+    // Icon 1: Gán (unassigned) hoặc Bàn giao (active)
+    if (acc.status === 'UNASSIGNED' || acc.ownerName === null) {
+      actionIcons += `
+        <button onclick="event.stopPropagation(); openAssignModal('${acc.id}')" title="Gán tài khoản cho nhân sự" class="w-7 h-7 rounded hover:bg-emerald-50 text-emerald-700 flex items-center justify-center cursor-pointer transition-colors">
+          <span class="material-symbols-outlined text-[17px]">person_add</span>
+        </button>
+      `;
+    } else if (acc.status === 'ACTIVE') {
+      actionIcons += `
+        <button onclick="event.stopPropagation(); openHandoverModal('${acc.id}')" title="Bàn giao tài khoản" class="w-7 h-7 rounded hover:bg-sky-50 text-sky-700 flex items-center justify-center cursor-pointer transition-colors">
+          <span class="material-symbols-outlined text-[17px]">sync_alt</span>
+        </button>
+      `;
+    } else {
+      actionIcons += `
+        <button disabled title="Không thể bàn giao khi ở trạng thái này" class="w-7 h-7 rounded text-slate-300 flex items-center justify-center cursor-not-allowed opacity-40">
+          <span class="material-symbols-outlined text-[17px]">sync_alt</span>
+        </button>
+      `;
+    }
+
+    // Icon 2: Khóa (active) hoặc Mở khóa (locked)
+    if (acc.status === 'ACTIVE') {
+      actionIcons += `
+        <button onclick="event.stopPropagation(); openLockModal('${acc.id}', true)" title="Tạm khóa tài khoản" class="w-7 h-7 rounded hover:bg-amber-50 text-amber-700 flex items-center justify-center cursor-pointer transition-colors">
+          <span class="material-symbols-outlined text-[17px]">lock</span>
+        </button>
+      `;
+    } else if (acc.status === 'LOCKED') {
+      actionIcons += `
+        <button onclick="event.stopPropagation(); openLockModal('${acc.id}', false)" title="Mở khóa tài khoản" class="w-7 h-7 rounded hover:bg-emerald-50 text-emerald-700 flex items-center justify-center cursor-pointer transition-colors">
+          <span class="material-symbols-outlined text-[17px]">lock_open</span>
+        </button>
+      `;
+    } else {
+      actionIcons += `
+        <button disabled title="Chỉ khóa được tài khoản đang hoạt động" class="w-7 h-7 rounded text-slate-300 flex items-center justify-center cursor-not-allowed opacity-40">
+          <span class="material-symbols-outlined text-[17px]">lock</span>
+        </button>
+      `;
+    }
+
+    // Icon 3: Thu hồi (active, pending, locked)
+    if (acc.status !== 'UNASSIGNED' && acc.ownerName !== null) {
+      actionIcons += `
+        <button onclick="event.stopPropagation(); openReclaimModal('${acc.id}')" title="Thu hồi về Kho trung tâm" class="w-7 h-7 rounded hover:bg-red-50 text-red-600 flex items-center justify-center cursor-pointer transition-colors">
+          <span class="material-symbols-outlined text-[17px]">undo</span>
+        </button>
+      `;
+    } else {
+      actionIcons += `
+        <button disabled title="Tài khoản đã ở Kho trung tâm" class="w-7 h-7 rounded text-slate-300 flex items-center justify-center cursor-not-allowed opacity-40">
+          <span class="material-symbols-outlined text-[17px]">undo</span>
+        </button>
+      `;
+    }
+
+    // Icon 4: Xem chi tiết (mở Drawer)
+    actionIcons += `
+      <button onclick="event.stopPropagation(); openDrawer('${acc.id}')" title="Xem chi tiết tài khoản" class="w-7 h-7 rounded hover:bg-slate-100 text-slate-600 hover:text-primary flex items-center justify-center cursor-pointer transition-colors">
+        <span class="material-symbols-outlined text-[17px]">visibility</span>
+      </button>
+    `;
+
+    tr.innerHTML = `
+      <td class="py-2.5 px-2 text-center w-8">
+        <input type="checkbox" class="acc-row-checkbox w-3.5 h-3.5 rounded border-slate-300 cursor-pointer accent-primary"
+          data-id="${acc.id}" onchange="toggleBulkSelect('${acc.id}', this.checked)"
+          ${AppState.selectedAccounts.has(acc.id) ? 'checked' : ''}>
+      </td>
+      <td class="py-2.5 px-3 font-semibold text-primary text-body-sm font-mono flex items-center gap-1.5">
+        <span>${acc.id}</span>
+        ${acc.isReclaimed ? '<span class="px-1 py-0.2 bg-red-100 text-red-700 text-[10px] rounded font-bold">Thu hồi</span>' : ''}
+      </td>
+      <td class="py-2.5 px-3 text-body-sm font-medium text-on-surface">
+        ${acc.ownerName 
+          ? `<div>${acc.displayName || acc.ownerName}</div>${acc.displayName && acc.displayName !== acc.ownerName ? `<div class="text-[10px] text-slate-400">(${acc.ownerName})</div>` : ''}` 
+          : (acc.isReclaimed && acc.formerOwner 
+              ? `<div class="text-slate-400 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span><span class="line-through-none">${acc.formerOwner.name}</span><span class="text-[10px] text-slate-400 bg-slate-100 px-1 py-0.2 rounded font-normal border border-slate-200">(Thu hồi - Cũ)</span></div>` 
+              : '<span class="text-slate-400 italic">Chưa gán</span>')}
+      </td>
+      <td class="py-2.5 px-3 text-body-xs text-on-surface-variant font-mono">
+        ${acc.ownerEmail 
+          ? acc.ownerEmail 
+          : (acc.isReclaimed && acc.formerOwner 
+              ? `<span class="text-slate-400 italic">${acc.formerOwner.email}</span>` 
+              : '<span class="text-slate-400">—</span>')}
+      </td>
+      <td class="py-2.5 px-3 text-body-xs text-on-surface-variant">
+        <div>${acc.branch}</div>
+        <div class="text-[10px] text-slate-400">${acc.region}</div>
+      </td>
+      <td class="py-2.5 px-3">${statusPill}</td>
+      <td class="py-2.5 px-3">${attentionCol}</td>
+      <td class="py-2 px-2 text-center">
+        <div class="inline-flex items-center gap-0.5 justify-center">
+          ${actionIcons}
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ─── BULK SELECTION & ACTIONS ───────────────────────────────────────────────
+function toggleBulkSelect(accountId, checked) {
+  if (checked) AppState.selectedAccounts.add(accountId);
+  else AppState.selectedAccounts.delete(accountId);
+  updateBulkActionBar();
+}
+
+function toggleSelectAll(checked) {
+  const checkboxes = document.querySelectorAll('.acc-row-checkbox');
+  checkboxes.forEach(cb => {
+    cb.checked = checked;
+    const id = cb.getAttribute('data-id');
+    if (checked) AppState.selectedAccounts.add(id);
+    else AppState.selectedAccounts.delete(id);
+  });
+  updateBulkActionBar();
+}
+
+function updateBulkActionBar() {
+  const bar = document.getElementById('bulk-action-bar');
+  const countEl = document.getElementById('bulk-selected-count');
+  const selectAllCb = document.getElementById('acc-select-all');
+  const count = AppState.selectedAccounts.size;
+  if (bar) {
+    if (count > 0) bar.classList.remove('hidden');
+    else bar.classList.add('hidden');
+  }
+  if (countEl) countEl.innerText = `Đã chọn ${count} tài khoản`;
+  // Sync select-all checkbox state
+  const allCbs = document.querySelectorAll('.acc-row-checkbox');
+  if (selectAllCb && allCbs.length > 0) {
+    const checkedCount = [...allCbs].filter(c => c.checked).length;
+    selectAllCb.indeterminate = checkedCount > 0 && checkedCount < allCbs.length;
+    selectAllCb.checked = checkedCount === allCbs.length;
+  }
+}
+
+function bulkLockSelected() {
+  const ids = [...AppState.selectedAccounts];
+  const eligible = ids.filter(id => {
+    const acc = AppState.accounts.find(a => a.id === id);
+    return acc && acc.status === 'ACTIVE';
+  });
+  if (eligible.length === 0) {
+    alert('Không có tài khoản nào đang hoạt động trong danh sách chọn để tạm khóa.');
+    return;
+  }
+  if (!confirm(`Tạm khóa hàng loạt ${eligible.length} tài khoản đang hoạt động?
+
+${eligible.join(', ')}
+
+Tài khoản sẽ bị đình chỉ nhưng dữ liệu được bảo lưu.`)) return;
+  eligible.forEach(id => {
+    const acc = AppState.accounts.find(a => a.id === id);
+    if (acc) {
+      acc.status = 'LOCKED';
+      acc.attention = { severity: 'WARNING', title: 'Tạm khóa hàng loạt theo yêu cầu quản trị' };
+      AppState.auditLogs.unshift({
+        id: `LOG-BULK-${id}`, type: 'lock', accountId: id,
+        message: `Tạm khóa hàng loạt tài khoản ${id}`,
+        actor: AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin Chi nhánh Ba Đình',
+        date: new Date().toLocaleString('vi-VN')
       });
+    }
+  });
+  AppState.selectedAccounts.clear();
+  renderAccounts();
+  alert(`Đã tạm khóa ${eligible.length} tài khoản thành công.`);
+}
+
+function bulkReclaimSelected() {
+  const ids = [...AppState.selectedAccounts];
+  const eligible = ids.filter(id => {
+    const acc = AppState.accounts.find(a => a.id === id);
+    return acc && acc.ownerName !== null && acc.status !== 'UNASSIGNED';
+  });
+  if (eligible.length === 0) {
+    alert('Không có tài khoản nào đủ điều kiện thu hồi trong danh sách chọn.');
+    return;
+  }
+  if (!confirm(`Thu hồi hàng loạt ${eligible.length} tài khoản về Kho trung tâm?
+
+${eligible.join(', ')}
+
+Thông tin nhân sự sẽ bị xóa khỏi các tài khoản này.`)) return;
+  eligible.forEach(id => {
+    const acc = AppState.accounts.find(a => a.id === id);
+    if (acc) {
+      acc.formerOwner = { name: acc.ownerName, email: acc.ownerEmail, code: acc.empCode,
+        dept: acc.empDept, branch: acc.branch, phone: acc.empPhone,
+        reclaimedDate: new Date().toLocaleString('vi-VN'), reclaimedBy: 'Super Admin (Bulk)',
+        reason: 'Thu hồi hàng loạt sau đợt nghỉ việc' };
+      acc.isReclaimed = true;
+      acc.ownerName = null; acc.displayName = null; acc.ownerEmail = null;
+      acc.empCode = null; acc.empDept = null; acc.empPhone = null;
+      acc.status = 'UNASSIGNED';
+      acc.region = 'Toàn quốc'; acc.branch = 'Kho trung tâm';
+      acc.attention = null;
+      AppState.auditLogs.unshift({
+        id: `LOG-BULK-${id}`, type: 'reclaim', accountId: id,
+        message: `Thu hồi hàng loạt tài khoản ${id} về Kho trung tâm`,
+        actor: 'Super Admin (Bulk)', date: new Date().toLocaleString('vi-VN')
+      });
+    }
+  });
+  AppState.selectedAccounts.clear();
+  renderAccounts();
+  alert(`Đã thu hồi ${eligible.length} tài khoản về Kho trung tâm thành công.`);
+}
+
+function clearBulkSelection() {
+  AppState.selectedAccounts.clear();
+  document.querySelectorAll('.acc-row-checkbox').forEach(cb => cb.checked = false);
+  const selectAllCb = document.getElementById('acc-select-all');
+  if (selectAllCb) { selectAllCb.checked = false; selectAllCb.indeterminate = false; }
+  updateBulkActionBar();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Drawer Open / Close / Tabs (CR-001 Redesign)
+function openDrawer(accountId) {
+  const acc = AppState.accounts.find(a => a.id === accountId);
+  if (!acc) return;
+
+  AppState.activeDrawerAccount = acc;
+
+  const drawer = document.getElementById('account-drawer');
+  drawer.classList.remove('translate-x-full');
+
+  // Show drawer overlay
+  const overlay = document.getElementById('drawer-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+
+  // Fill Header
+  document.getElementById('dw-account-id').innerText = acc.id;
+  document.getElementById('dw-username').innerText = acc.username;
+
+  // Status Badge
+  const statusBadge = document.getElementById('dw-status-badge');
+  if (acc.isReclaimed) {
+    statusBadge.className = 'px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-800 border border-red-300';
+    statusBadge.innerText = 'Đã thu hồi';
+  } else if (acc.ownerName === null || acc.status === 'UNASSIGNED') {
+    statusBadge.className = 'px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-300';
+    statusBadge.innerText = 'Chưa phân bổ';
+  } else if (acc.status === 'ACTIVE') {
+    statusBadge.className = 'px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300';
+    statusBadge.innerText = 'Đang hoạt động';
+  } else if (acc.status === 'PENDING') {
+    statusBadge.className = 'px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300';
+    statusBadge.innerText = 'Chờ kích hoạt';
+  } else if (acc.status === 'LOCKED') {
+    statusBadge.className = 'px-2 py-0.5 rounded text-xs font-semibold bg-slate-300 text-slate-800 border border-slate-400';
+    statusBadge.innerText = 'Tạm khóa';
+  }
+
+  // Attention banner in drawer
+  const attBanner = document.getElementById('dw-attention-banner');
+  if (acc.attention) {
+    attBanner.classList.remove('hidden');
+    document.getElementById('dw-attention-title').innerText = acc.attention.title;
+  } else {
+    attBanner.classList.add('hidden');
+  }
+
+  // SECTION 1: THÔNG TIN NHÂN SỰ HR
+  const hrDataGrid = document.getElementById('dw-hr-data-grid');
+  const hrEmpty = document.getElementById('dw-hr-empty');
+  const hrBadge = document.getElementById('dw-hr-badge');
+  const hrReclaimedAlert = document.getElementById('dw-hr-reclaimed-alert');
+
+  if (acc.isReclaimed && acc.formerOwner) {
+    if (hrReclaimedAlert) hrReclaimedAlert.classList.remove('hidden');
+    hrDataGrid.classList.remove('hidden');
+    hrEmpty.classList.add('hidden');
+    hrBadge.innerText = 'Đã thu hồi - Nhân sự cũ';
+    hrBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-200 text-slate-700 border border-slate-300';
+
+    document.getElementById('dw-hr-code').innerText = acc.formerOwner.code || '—';
+    document.getElementById('dw-hr-name').innerText = acc.formerOwner.name;
+    document.getElementById('dw-hr-dept').innerText = acc.formerOwner.dept || 'Kinh doanh Khách hàng';
+    document.getElementById('dw-hr-branch').innerText = acc.formerOwner.branch || 'Chi nhánh cũ';
+    document.getElementById('dw-hr-email').innerText = acc.formerOwner.email || '—';
+    document.getElementById('dw-hr-phone').innerText = acc.formerOwner.phone || '—';
+
+    // Apply muted gray styling to all info boxes
+    hrDataGrid.querySelectorAll('div').forEach(box => {
+      box.classList.add('opacity-75', 'bg-slate-50', 'text-slate-500');
     });
 
-    const refreshBtn = document.getElementById('btn-refresh-overview');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => {
-        showToast('Đã làm mới dữ liệu Quota toàn hệ thống', 'success');
-        renderApp();
-      });
-    }
+  // Update Ownership History Button in Drawer Header
+  const historyCount = (acc.ownershipHistory ? acc.ownershipHistory.length : 0) + (acc.formerOwner ? 1 : 0);
+  const btnHistory = document.getElementById('dw-btn-ownership-history');
+  if (btnHistory) {
+    btnHistory.innerHTML = `<span class="material-symbols-outlined text-[15px]">history</span> <span>Lịch sử nhân sự (${historyCount})</span>`;
+    btnHistory.onclick = () => openOwnershipHistoryModal(acc.id);
+  }
+  } else if (acc.ownerName) {
+    if (hrReclaimedAlert) hrReclaimedAlert.classList.add('hidden');
+    hrDataGrid.classList.remove('hidden');
+    hrEmpty.classList.add('hidden');
+    hrBadge.innerText = acc.empStatus || 'Chính thức';
+    hrBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800';
 
-    const jumpBtn = document.getElementById('btn-jump-to-quota');
-    if (jumpBtn) {
-      jumpBtn.addEventListener('click', () => {
-        state.activeView = 'quota';
-        saveState();
-        renderApp();
-      });
-    }
+    document.getElementById('dw-hr-code').innerText = acc.empCode || 'NV10492';
+    document.getElementById('dw-hr-name').innerText = acc.ownerName;
+    document.getElementById('dw-hr-dept').innerText = acc.empDept || 'Kinh doanh Khách hàng';
+    document.getElementById('dw-hr-branch').innerText = acc.branch;
+    document.getElementById('dw-hr-email').innerText = acc.ownerEmail;
+    document.getElementById('dw-hr-phone').innerText = acc.empPhone || '0982.345.678';
 
-    container.querySelectorAll('[data-branch-jump]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        const bId = el.getAttribute('data-branch-jump');
-        if (bId) {
-          state.activeView = 'quota';
-          state.quotaFilters.branch = bId;
-          saveState();
-          renderApp();
-        }
+    // Remove muted styling
+    hrDataGrid.querySelectorAll('div').forEach(box => {
+      box.classList.remove('opacity-75', 'bg-slate-50', 'text-slate-500');
+    });
+  } else {
+    if (hrReclaimedAlert) hrReclaimedAlert.classList.add('hidden');
+    hrDataGrid.classList.add('hidden');
+    hrEmpty.classList.remove('hidden');
+    hrBadge.innerText = 'Chưa gán';
+    hrBadge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-300';
+  }
+
+  // SECTION 2: THÔNG TIN ZALO CLOUD & TÊN HIỂN THỊ
+  document.getElementById('dw-zalo-id').innerText = acc.id;
+  document.getElementById('dw-zalo-username').innerText = acc.username;
+  document.getElementById('dw-display-name').innerText = acc.displayName || acc.ownerName || 'Chưa thiết lập';
+  document.getElementById('dw-created-date').innerText = acc.createdDate;
+  document.getElementById('dw-assigned-date').innerText = acc.assignedDate || 'Chưa gán';
+
+  // Toggle edit profile button (only when assigned)
+  const editProfileBtn = document.getElementById('dw-btn-edit-profile');
+  if (editProfileBtn) {
+    if (acc.ownerName) editProfileBtn.classList.remove('hidden');
+    else editProfileBtn.classList.add('hidden');
+  }
+
+  // Render Unified Timeline (CR-001: Lịch sử & Nhật ký)
+  const timelineList = document.getElementById('dw-timeline-list');
+  timelineList.innerHTML = '';
+
+  const events = [];
+  // 1. History events
+  if (acc.history && acc.history.length > 0) {
+    acc.history.forEach(h => {
+      events.push({
+        type: 'HISTORY',
+        timestamp: h.date,
+        title: `${h.from} → ${h.to}`,
+        actor: h.by,
+        icon: 'swap_horiz',
+        iconBg: 'bg-primary/10 text-primary'
       });
     });
   }
 
-  // =========================================================================
-  // 5. VIEW 2: QUOTA (QUẢN LÝ QUOTA & TÀI KHOẢN NHÂN VIÊN)
-  // =========================================================================
-
-    function renderQuotaView(container) {
-    const isBranchAdmin = state.currentPersona === 'branch_admin';
-    if (isBranchAdmin) {
-      state.quotaFilters.branch = 'HCM-01';
-      state.quotaFilters.region = 'South';
+  // 2. Audit log events
+  const accountLogs = AppState.auditLogs.filter(l => l.target === acc.id);
+  accountLogs.forEach(l => {
+    let icon = 'info';
+    let iconBg = 'bg-slate-100 text-slate-700';
+    if (l.action.includes('Gán') || l.action.includes('Cấp')) {
+      icon = 'person_add';
+      iconBg = 'bg-emerald-50 text-emerald-700';
+    } else if (l.action.includes('Bàn giao')) {
+      icon = 'sync_alt';
+      iconBg = 'bg-sky-50 text-sky-700';
+    } else if (l.action.includes('Tạm khóa')) {
+      icon = 'lock';
+      iconBg = 'bg-amber-50 text-amber-700';
+    } else if (l.action.includes('Thu hồi')) {
+      icon = 'undo';
+      iconBg = 'bg-red-50 text-red-700';
+    } else if (l.action.includes('Profile') || l.action.includes('Tùy chỉnh')) {
+      icon = 'badge';
+      iconBg = 'bg-indigo-50 text-indigo-700';
     }
 
-    const filteredBase = state.employees.filter(e => {
-      if (isBranchAdmin) return e.branchId === 'HCM-01';
-      if (state.quotaFilters.region !== 'ALL' && e.region !== state.quotaFilters.region) return false;
-      if (state.quotaFilters.branch !== 'ALL' && e.branchId !== state.quotaFilters.branch) return false;
-      return true;
+    events.push({
+      type: 'AUDIT',
+      timestamp: l.timestamp,
+      title: `${l.action}: ${l.detail}`,
+      actor: `${l.actor} (${l.role})`,
+      icon,
+      iconBg
     });
+  });
 
-    const countAll = filteredBase.length;
-    const countActive = filteredBase.filter(e => e.accountStatus === 'Active').length;
-    const countPending = filteredBase.filter(e => e.accountStatus === 'Pending').length;
-    const countSuspended = filteredBase.filter(e => e.accountStatus === 'Suspended').length;
-    const countAttention = filteredBase.filter(e => e.attentionReason !== null || e.employeeStatus === 'Terminated').length;
-
-    const revokedInScope = state.revokedAccounts.filter(r => {
-      if (isBranchAdmin) return r.branchId === 'HCM-01';
-      if (state.quotaFilters.region !== 'ALL' && r.region !== state.quotaFilters.region) return false;
-      if (state.quotaFilters.branch !== 'ALL' && r.branchId !== state.quotaFilters.branch) return false;
-      return true;
+  if (events.length === 0) {
+    timelineList.innerHTML = `<div class="text-xs text-slate-400 italic p-3 text-center">Chưa có lịch sử hoặc nhật ký thao tác nào cho tài khoản này.</div>`;
+  } else {
+    events.forEach(ev => {
+      const card = document.createElement('div');
+      card.className = 'flex items-start gap-2.5 p-2.5 rounded-lg border border-outline-variant/30 bg-white text-xs shadow-2xs';
+      card.innerHTML = `
+        <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${ev.iconBg}">
+          <span class="material-symbols-outlined text-[16px]">${ev.icon}</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
+            <span class="font-mono">${ev.timestamp}</span>
+            <span class="text-slate-500 font-medium">${ev.actor}</span>
+          </div>
+          <div class="text-on-surface font-medium leading-snug">${ev.title}</div>
+        </div>
+      `;
+      timelineList.appendChild(card);
     });
-    const unassignedEmps = filteredBase.filter(e => e.accountStatus === 'Unassigned');
-    const countUnassignedPool = revokedInScope.length + unassignedEmps.length;
+  }
 
-    const finalEmployees = filteredBase.filter(e => {
-      if (state.quotaFilters.activeTab === 'ACTIVE' && e.accountStatus !== 'Active') return false;
-      if (state.quotaFilters.activeTab === 'PENDING' && e.accountStatus !== 'Pending') return false;
-      if (state.quotaFilters.activeTab === 'SUSPENDED' && e.accountStatus !== 'Suspended') return false;
-      if (state.quotaFilters.activeTab === 'ATTENTION' && !e.attentionReason && e.employeeStatus !== 'Terminated') return false;
-      if (state.quotaFilters.activeTab === 'UNASSIGNED_POOL' && e.accountStatus !== 'Unassigned') return false;
+  // Contextual Sticky Action Bar Setup (with PENDING constraints)
+  updateDrawerActionBar(acc);
 
-      // Advanced Filters
-      if (state.quotaFilters.advAccountStatus !== 'ALL' && e.accountStatus !== state.quotaFilters.advAccountStatus) return false;
-      if (state.quotaFilters.advAttentionType === 'OVERDUE' && (!e.pendingOverdue || e.accountStatus !== 'Pending')) return false;
-      if (state.quotaFilters.advAttentionType === 'TERMINATED' && e.employeeStatus !== 'Terminated') return false;
-      if (state.quotaFilters.advAttentionType === 'INACTIVE30' && (!e.attentionReason || !e.attentionReason.includes('30 ngày'))) return false;
+  // Switch to Information Tab by default
+  switchDrawerTab('info');
+}
 
-      if (state.quotaFilters.search) {
-        const q = state.quotaFilters.search.toLowerCase();
-        const matchName = e.name.toLowerCase().includes(q);
-        const matchCode = e.code ? e.code.toLowerCase().includes(q) : false;
-        const matchEmail = e.email ? e.email.toLowerCase().includes(q) : false;
-        const matchAcc = e.accountId ? e.accountId.toLowerCase().includes(q) : false;
-        if (!matchName && !matchCode && !matchEmail && !matchAcc) return false;
-      }
-      return true;
-    });
+function closeDrawer() {
+  document.getElementById('account-drawer').classList.add('translate-x-full');
+  AppState.activeDrawerAccount = null;
+  const overlay = document.getElementById('drawer-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
 
-    // Pagination Calculation
-    const totalItems = finalEmployees.length;
-    const pageSize = state.quotaPagination ? (state.quotaPagination.pageSize || 10) : 10;
-    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-    if (!state.quotaPagination) {
-      state.quotaPagination = { page: 1, pageSize: 10 };
+function switchDrawerTab(tabName) {
+  document.querySelectorAll('.dw-panel').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.dw-tab-btn').forEach(btn => {
+    btn.classList.remove('border-primary', 'text-primary', 'font-semibold');
+    btn.classList.add('border-transparent', 'text-on-surface-variant');
+  });
+
+  const panel = document.getElementById(`dw-panel-${tabName}`);
+  if (panel) panel.classList.remove('hidden');
+  const targetBtn = document.getElementById(`dw-tab-btn-${tabName}`);
+  if (targetBtn) {
+    targetBtn.classList.add('border-primary', 'text-primary', 'font-semibold');
+    targetBtn.classList.remove('border-transparent', 'text-on-surface-variant');
+  }
+}
+
+// Update Drawer Action buttons based on status & role (CR-001 Constraints)
+function updateDrawerActionBar(acc) {
+  const container = document.getElementById('dw-action-bar');
+  container.innerHTML = '';
+
+  const isSuper = AppState.currentRole === 'SUPER_ADMIN';
+
+  // Case 1: Unassigned Account
+  if (acc.ownerName === null || acc.status === 'UNASSIGNED') {
+    if (acc.branch === 'Kho trung tâm' && !isSuper) {
+      container.innerHTML = `<span class="text-xs text-slate-400 italic">Tài khoản thuộc Kho trung tâm, chỉ Super Admin được thao tác gán.</span>`;
+      return;
     }
-    if (state.quotaPagination.page > totalPages) state.quotaPagination.page = totalPages;
-    if (state.quotaPagination.page < 1) state.quotaPagination.page = 1;
-    const currentPage = state.quotaPagination.page;
-    const startIndex = (currentPage - 1) * pageSize;
-    const paginatedEmployees = finalEmployees.slice(startIndex, startIndex + pageSize);
 
-    // Bulk selection check
-    if (!state.selectedBulkIds) state.selectedBulkIds = [];
-    const pageEmpIds = paginatedEmployees.map(e => e.id);
-    const allSelectedOnPage = pageEmpIds.length > 0 && pageEmpIds.every(id => state.selectedBulkIds.includes(id));
+    container.innerHTML = `
+      <button class="flex-1 h-9 px-3 bg-primary text-white rounded font-medium text-xs hover:bg-primary-container flex items-center justify-center gap-1.5 cursor-pointer shadow-sm" onclick="openAssignModal('${acc.id}')">
+        <span class="material-symbols-outlined text-[16px]">person_add</span>
+        <span>Gán tài khoản</span>
+      </button>
+    `;
+    return;
+  }
 
-    let html = `
-      <div class="view-header">
-        <div class="view-title-group">
-          <div class="title-with-pill">
-            <h1 class="view-page-title">Quản Lý Quota & Nhân Sự</h1>
-            <span class="scope-pill-badge">${isBranchAdmin ? 'Chi nhánh HCM-01' : 'Toàn hệ thống'}</span>
-          </div>
-          <p class="view-page-desc">
-            Quản trị danh sách nhân sự, trạng thái tài khoản Zalo Enterprise, bàn giao và bảo vệ dữ liệu khách hàng.
-          </p>
-        </div>
-        <div class="view-header-actions">
-          <button class="btn btn-primary btn-sm" id="btn-open-assign-new">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-              <circle cx="8.5" cy="7" r="4"></circle>
-              <line x1="20" y1="8" x2="20" y2="14"></line>
-              <line x1="23" y1="11" x2="17" y2="11"></line>
-            </svg>
-            <span>Cấp Account</span>
+  // Case 2: PENDING Account (CR-001: DISABLE Handover & Lock, ENABLE Reclaim & Reset/Resend)
+  if (acc.status === 'PENDING') {
+    container.innerHTML = `
+      <button class="flex-1 h-9 px-2 bg-slate-100 text-slate-400 border border-slate-200 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-not-allowed opacity-50" disabled title="Tài khoản đang chờ kích hoạt (timeout 3 ngày), không thể bàn giao">
+        <span class="material-symbols-outlined text-[15px]">sync_alt</span>
+        <span>Bàn giao</span>
+      </button>
+
+      <button class="h-9 px-2 bg-slate-100 text-slate-400 border border-slate-200 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-not-allowed opacity-50" disabled title="Tài khoản đang chờ kích hoạt, không thể tạm khóa">
+        <span class="material-symbols-outlined text-[15px]">lock</span>
+        <span>Tạm khóa</span>
+      </button>
+
+      <button class="h-9 px-2 bg-red-50 text-red-700 hover:bg-red-100 border border-red-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openReclaimModal('${acc.id}')" title="Thu hồi tài khoản về Kho trung tâm">
+        <span class="material-symbols-outlined text-[15px]">undo</span>
+        <span>Thu hồi</span>
+      </button>
+
+      <button class="h-9 px-2.5 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openResetPasswordModal('${acc.id}')" title="Gửi lại mã/link kích hoạt tài khoản">
+        <span class="material-symbols-outlined text-[15px]">send</span>
+        <span>Gửi lại kích hoạt</span>
+      </button>
+    `;
+    return;
+  }
+
+  // Case 3: ACTIVE Account (Full actions)
+  if (acc.status === 'ACTIVE') {
+    container.innerHTML = `
+      <button class="flex-1 h-9 px-2 bg-surface-container-high text-primary hover:bg-surface-container-highest border border-primary/20 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openHandoverModal('${acc.id}')" title="Bàn giao tài khoản trực tiếp cho nhân viên khác">
+        <span class="material-symbols-outlined text-[15px]">sync_alt</span>
+        <span>Bàn giao</span>
+      </button>
+
+      <button class="h-9 px-2 bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openLockModal('${acc.id}', true)">
+        <span class="material-symbols-outlined text-[15px]">lock</span>
+        <span>Tạm khóa</span>
+      </button>
+
+      <button class="h-9 px-2 bg-red-50 text-red-700 hover:bg-red-100 border border-red-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openReclaimModal('${acc.id}')">
+        <span class="material-symbols-outlined text-[15px]">undo</span>
+        <span>Thu hồi</span>
+      </button>
+
+      ${isSuper ? `
+        <div class="relative">
+          <button class="w-9 h-9 flex items-center justify-center rounded border border-outline-variant hover:bg-surface-container-high text-on-surface-variant cursor-pointer" onclick="toggleDropdown('dw-more-actions')">
+            <span class="material-symbols-outlined text-[18px]">more_vert</span>
           </button>
-        </div>
-      </div>
-
-            <div class="quota-filter-toolbar">
-        <div class="toolbar-search-wrap">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-          <input type="text" class="input-text-main" id="quota-search-input" 
-                 placeholder="Tìm theo tên nhân viên, email hoặc mã tài khoản Zalo..." 
-                 value="${escapeHtml(state.quotaFilters.search)}">
-        </div>
-
-        <div class="toolbar-dropdown-group">
-          <div class="toolbar-dropdown-item">
-            <label class="dropdown-label">Vùng:</label>
-            <select class="filter-select" id="quota-region-select" ${isBranchAdmin ? 'disabled' : ''}>
-              <option value="ALL" ${state.quotaFilters.region === 'ALL' ? 'selected' : ''}>Tất cả Vùng</option>
-              <option value="South" ${state.quotaFilters.region === 'South' ? 'selected' : ''}>Miền Nam</option>
-              <option value="Central" ${state.quotaFilters.region === 'Central' ? 'selected' : ''}>Miền Trung</option>
-              <option value="North" ${state.quotaFilters.region === 'North' ? 'selected' : ''}>Miền Bắc</option>
-            </select>
-          </div>
-
-          <div class="toolbar-dropdown-item">
-            <label class="dropdown-label">Chi nhánh:</label>
-            <select class="filter-select" id="quota-branch-select" ${isBranchAdmin ? 'disabled' : ''}>
-              <option value="ALL" ${state.quotaFilters.branch === 'ALL' ? 'selected' : ''}>Tất cả Chi nhánh</option>
-              ${renderBranchOptions()}
-            </select>
-          </div>
-
-          <!-- Nút mở Bộ Lọc Nâng Cao -->
-          <button class="btn-filter-trigger ${state.quotaFilters.advancedOpen || state.quotaFilters.advAccountStatus !== 'ALL' || state.quotaFilters.advAttentionType !== 'ALL' ? 'active' : ''}" id="btn-toggle-advanced-filters">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-            </svg>
-            <span>Bộ lọc nâng cao</span>
-            ${(state.quotaFilters.advAccountStatus !== 'ALL' ? 1 : 0) + (state.quotaFilters.advAttentionType !== 'ALL' ? 1 : 0) > 0 ? `
-              <span class="filter-badge">${(state.quotaFilters.advAccountStatus !== 'ALL' ? 1 : 0) + (state.quotaFilters.advAttentionType !== 'ALL' ? 1 : 0)}</span>
-            ` : ''}
-          </button>
-
-          ${state.quotaFilters.search || state.quotaFilters.region !== 'ALL' || state.quotaFilters.branch !== 'ALL' || state.quotaFilters.advAccountStatus !== 'ALL' || state.quotaFilters.advAttentionType !== 'ALL' ? `
-            <button class="btn btn-outline btn-sm" id="btn-reset-quota-filters">Xóa lọc</button>
-          ` : ''}
-        </div>
-      </div>
-
-      <!-- Advanced Filters Panel (Bộ lọc nâng cao) -->
-      ${state.quotaFilters.advancedOpen ? `
-        <div class="advanced-filters-panel" id="advanced-filters-panel">
-          <div class="advanced-filters-grid">
-            <div class="filter-field-group">
-              <label>Trạng Thái Tài Khoản Zalo</label>
-              <select class="filter-select" id="adv-filter-status">
-                <option value="ALL" ${state.quotaFilters.advAccountStatus === 'ALL' ? 'selected' : ''}>Tất cả trạng thái</option>
-                <option value="Active" ${state.quotaFilters.advAccountStatus === 'Active' ? 'selected' : ''}>Đang hoạt động</option>
-                <option value="Pending" ${state.quotaFilters.advAccountStatus === 'Pending' ? 'selected' : ''}>Chờ kích hoạt</option>
-                <option value="Suspended" ${state.quotaFilters.advAccountStatus === 'Suspended' ? 'selected' : ''}>Tạm khóa</option>
-                <option value="Unassigned" ${state.quotaFilters.advAccountStatus === 'Unassigned' ? 'selected' : ''}>Chưa cấp tài khoản</option>
-              </select>
-            </div>
-
-            <div class="filter-field-group">
-              <label>Loại Cảnh Báo & Rủi Ro</label>
-              <select class="filter-select" id="adv-filter-attention">
-                <option value="ALL" ${state.quotaFilters.advAttentionType === 'ALL' ? 'selected' : ''}>Tất cả nhân sự</option>
-                <option value="OVERDUE" ${state.quotaFilters.advAttentionType === 'OVERDUE' ? 'selected' : ''}>Quá hạn kích hoạt (>24h)</option>
-                <option value="TERMINATED" ${state.quotaFilters.advAttentionType === 'TERMINATED' ? 'selected' : ''}>Nhân sự đã nghỉ việc (Terminated)</option>
-                <option value="INACTIVE30" ${state.quotaFilters.advAttentionType === 'INACTIVE30' ? 'selected' : ''}>Không hoạt động > 30 ngày</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="advanced-filters-footer">
-            <button class="btn btn-outline btn-sm" id="btn-cancel-advanced-filters">Đóng</button>
-            <button class="btn btn-primary btn-sm" id="btn-apply-advanced-filters">Áp dụng bộ lọc</button>
+          <div id="dw-more-actions" class="hidden absolute bottom-11 right-0 w-36 bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 z-30">
+            <button class="w-full px-3 py-1.5 text-left text-xs hover:bg-surface-container-high flex items-center gap-1.5 cursor-pointer text-on-surface" onclick="openResetPasswordModal('${acc.id}')">
+              <span class="material-symbols-outlined text-[14px]">password</span>
+              <span>Reset mật khẩu</span>
+            </button>
           </div>
         </div>
       ` : ''}
-
-      <div class="quota-tabs-bar">
-        <button class="tab-btn ${state.quotaFilters.activeTab === 'ALL' ? 'active' : ''}" data-tab="ALL">
-          <span>Tất cả nhân viên</span>
-          <span class="tab-btn-count">${countAll}</span>
-        </button>
-
-        <button class="tab-btn ${state.quotaFilters.activeTab === 'UNASSIGNED_POOL' ? 'active' : ''}" data-tab="UNASSIGNED_POOL">
-          <span>Kho tài khoản chưa cấp</span>
-          <span class="tab-btn-count">${countUnassignedPool}</span>
-        </button>
-
-        <button class="tab-btn ${state.quotaFilters.activeTab === 'ACTIVE' ? 'active' : ''}" data-tab="ACTIVE">
-          <span>Đang hoạt động</span>
-          <span class="tab-btn-count">${countActive}</span>
-        </button>
-
-        <button class="tab-btn ${state.quotaFilters.activeTab === 'PENDING' ? 'active' : ''}" data-tab="PENDING">
-          <span>Chờ kích hoạt</span>
-          <span class="tab-btn-count">${countPending}</span>
-        </button>
-
-        <button class="tab-btn ${state.quotaFilters.activeTab === 'SUSPENDED' ? 'active' : ''}" data-tab="SUSPENDED">
-          <span>Tạm khóa</span>
-          <span class="tab-btn-count">${countSuspended}</span>
-        </button>
-
-        <button class="tab-btn tab-btn-warn ${state.quotaFilters.activeTab === 'ATTENTION' ? 'active' : ''}" data-tab="ATTENTION">
-          <span>Cần chú ý</span>
-          <span class="tab-btn-count">${countAttention}</span>
-        </button>
-      </div>
     `;
-
-    if (state.quotaFilters.activeTab === 'UNASSIGNED_POOL') {
-      html += renderUnassignedPoolSection(revokedInScope, unassignedEmps);
-    } else {
-      html += `
-        <div class="table-card">
-          <div class="table-responsive">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width: 44px; text-align: center;">
-                    <input type="checkbox" id="quota-select-all" class="table-checkbox" ${allSelectedOnPage ? 'checked' : ''} title="Chọn tất cả trên trang này">
-                  </th>
-                  <th style="width: 220px;">NHÂN VIÊN</th>
-                  <th style="width: 210px;">EMAIL DOANH NGHIỆP</th>
-                  <th style="width: 160px;">CHI NHÁNH</th>
-                  <th style="width: 180px;">TÀI KHOẢN ZALO</th>
-                  <th style="width: 160px;">TRẠNG THÁI</th>
-                  <th style="width: 160px;">CẦN CHÚ Ý</th>
-                  <th style="width: 130px;">HOẠT ĐỘNG</th>
-                  <th style="width: 120px; text-align: right;">THAO TÁC</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${paginatedEmployees.length === 0 ? `
-                  <tr>
-                    <td colspan="10" class="table-empty-cell">
-                      Không tìm thấy nhân sự phù hợp với điều kiện lọc hiện tại.
-                    </td>
-                  </tr>
-                ` : paginatedEmployees.map(e => {
-                  const isChecked = state.selectedBulkIds.includes(e.id);
-                  return `
-                    <tr class="table-row-clickable ${isChecked ? 'row-selected' : ''}" data-open-drawer="${e.id}">
-                      <td style="text-align: center;" onclick="event.stopPropagation();">
-                        <input type="checkbox" class="table-checkbox quota-row-check" data-emp="${e.id}" ${isChecked ? 'checked' : ''}>
-                      </td>
-
-                      <td>
-                        <div class="emp-profile-cell">
-                          <div class="emp-avatar-circle">${getInitials(e.name)}</div>
-                          <span class="emp-name-text font-semibold">${escapeHtml(e.name)}</span>
-                        </div>
-                      </td>
-
-                      <td>
-                        ${e.accountStatus !== 'Unassigned' && e.email ? `
-                          <span class="text-secondary font-mono text-sm">${escapeHtml(e.email)}</span>
-                        ` : `
-                          <span class="text-muted text-xs font-mono">—</span>
-                        `}
-                      </td>
-                      <td>
-                        <div class="branch-cell-simple">
-                          <span class="branch-main-name">${escapeHtml(e.branchName)}</span>
-                          <span class="branch-code-badge font-mono">${e.branchId}</span>
-                        </div>
-                      </td>
-                      <td>
-                        ${e.accountId ? `
-                          <div class="zalo-account-cell">
-                            <span class="zalo-id-text font-mono text-primary font-semibold">${e.accountId}</span>
-                            <span class="zalo-date-text">Cấp: ${e.zaloAssignedDate || '—'}</span>
-                          </div>
-                        ` : `
-                          <span class="zalo-none-text">— Chưa cấp —</span>
-                        `}
-                      </td>
-                      <td>
-                        <div class="status-cell-group">
-                          ${renderAccountStatusBadge(e)}
-                        </div>
-                      </td>
-                      <td>
-                        ${renderCompactAttentionTag(e)}
-                      </td>
-
-                      <td>
-                        <span class="text-xs text-secondary font-mono">${e.lastActiveDate || e.zaloAssignedDate || '—'}</span>
-                      </td>
-
-                      <td style="text-align: right;" onclick="event.stopPropagation();">
-                        ${renderRowActions(e)}
-                      </td>
-                    </tr>
-                  `;
-                }).join('')}
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Pagination Bar -->
-          <div class="table-pagination-bar">
-            <div class="pagination-left">
-              <span>Hiển thị <strong>${totalItems === 0 ? 0 : startIndex + 1}–${Math.min(startIndex + pageSize, totalItems)}</strong> trên <strong>${totalItems}</strong> nhân sự</span>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span class="text-xs text-muted">Số dòng:</span>
-                <select class="pagination-size-select" id="quota-page-size-select">
-                  <option value="10" ${pageSize === 10 ? 'selected' : ''}>10 / trang</option>
-                  <option value="25" ${pageSize === 25 ? 'selected' : ''}>25 / trang</option>
-                  <option value="50" ${pageSize === 50 ? 'selected' : ''}>50 / trang</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="pagination-right">
-              <button class="pagination-page-btn" id="pagination-btn-prev" ${currentPage <= 1 ? 'disabled' : ''}>‹</button>
-              ${Array.from({ length: totalPages }, (_, i) => i + 1).map(p => `
-                <button class="pagination-page-btn ${p === currentPage ? 'active' : ''}" data-page="${p}">${p}</button>
-              `).join('')}
-              <button class="pagination-page-btn" id="pagination-btn-next" ${currentPage >= totalPages ? 'disabled' : ''}>›</button>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    container.innerHTML = html;
-    attachQuotaViewListeners(container);
-    updateBulkBar();
+    return;
   }
 
-  function renderBranchOptions() {
-    const list = [];
-    for (const r of state.orgTree.regions) {
-      if (state.quotaFilters.region !== 'ALL' && r.id !== state.quotaFilters.region) continue;
-      for (const b of r.branches) {
-        list.push(`<option value="${b.id}" ${state.quotaFilters.branch === b.id ? 'selected' : ''}>${escapeHtml(b.name)} (${b.id})</option>`);
-      }
-    }
-    return list.join('');
-  }
+  // Case 4: LOCKED Account
+  if (acc.status === 'LOCKED') {
+    container.innerHTML = `
+      <button class="flex-1 h-9 px-3 bg-emerald-600 text-white hover:bg-emerald-700 rounded font-medium text-xs flex items-center justify-center gap-1.5 cursor-pointer" onclick="openLockModal('${acc.id}', false)">
+        <span class="material-symbols-outlined text-[16px]">lock_open</span>
+        <span>Mở khóa tài khoản</span>
+      </button>
 
-
-  // Helper gọt bớt các dòng chú ý ngắn gọn (súc tích, không phá vỡ bố cục bảng)
-  function renderCompactAttentionTag(emp) {
-    if (!emp.attentionReason && emp.employeeStatus !== 'Terminated') {
-      return '<span class="text-muted">—</span>';
-    }
-
-    if (emp.employeeStatus === 'Terminated') {
-      return `<span class="attention-tag-compact danger" title="${escapeHtml(emp.attentionReason || 'Nhân sự đã nghỉ việc, cần thu hồi tài khoản')}">⚠ Nghỉ việc</span>`;
-    }
-
-    const r = emp.attentionReason.toLowerCase();
-    if (emp.accountStatus === 'Pending' && (emp.pendingOverdue || r.includes('quá hạn') || r.includes('chờ kích hoạt'))) {
-      const hours = emp.pendingHours ? ` (${emp.pendingHours}h)` : '';
-      return `<span class="attention-tag-compact warning" title="${escapeHtml(emp.attentionReason)}">⚠ Quá hạn kích hoạt${hours}</span>`;
-    }
-    if (r.includes('30 ngày') || r.includes('không hoạt động') || r.includes('ko hoạt động')) {
-      return `<span class="attention-tag-compact warning" title="${escapeHtml(emp.attentionReason)}">⚠ >30d ko dùng</span>`;
-    }
-    if (r.includes('chưa cấp') || emp.accountStatus === 'Unassigned') {
-      return `<span class="attention-tag-compact neutral" title="${escapeHtml(emp.attentionReason)}">⚠ Chưa cấp</span>`;
-    }
-    if (r.includes('tạm khóa') || emp.accountStatus === 'Suspended') {
-      return `<span class="attention-tag-compact danger" title="${escapeHtml(emp.attentionReason)}">⚠ Đang khóa</span>`;
-    }
-
-    // Cắt ngắn nếu lý do khác
-    const shortText = emp.attentionReason.length > 20 ? emp.attentionReason.slice(0, 18) + '...' : emp.attentionReason;
-    return `<span class="attention-tag-compact warning" title="${escapeHtml(emp.attentionReason)}">⚠ ${escapeHtml(shortText)}</span>`;
-  }
-
-  function renderAccountStatusBadge(e) {
-    if (e.accountStatus === 'Active') {
-      return `<span class="account-badge badge-active"><span class="dot-green">●</span> Đang hoạt động</span>`;
-    } else if (e.accountStatus === 'Pending') {
-      return `<span class="account-badge badge-pending"><span class="dot-amber">●</span> Chờ kích hoạt</span>`;
-    } else if (e.accountStatus === 'Suspended') {
-      return `<span class="account-badge badge-suspended"><span class="dot-red">●</span> Tạm khóa</span>`;
-    } else if (e.accountStatus === 'HandedOver') {
-      return `<span class="account-badge badge-handedover" title="Đã bàn giao cho ${escapeHtml(e.handedOverTo || 'nhân sự khác')}">
-        Đã bàn giao ➔ ${escapeHtml(e.handedOverTo || '')}
-      </span>`;
-    } else {
-      return `<span class="account-badge badge-unassigned">Chưa cấp</span>`;
-    }
-  }
-
-  function renderRowActions(e) {
-    if (e.accountStatus === 'Unassigned') {
-      return `
-        <button class="btn btn-primary btn-xs" data-action="assign" data-emp="${e.id}">Cấp account</button>
-      `;
-    } else if (e.accountStatus === 'Pending') {
-      return `
-        <div class="action-dropdown-wrap">
-          <button class="btn btn-outline btn-xs" data-action="remind-pending" data-emp="${e.id}">Nhắc nhở</button>
-          <button class="btn-more-dots" data-toggle-menu="${e.id}">•••</button>
-          <div class="menu-popover" id="menu-${e.id}" style="display: none;">
-            <button class="menu-item" data-action="view-drawer" data-emp="${e.id}">Xem chi tiết</button>
-            <button class="menu-item menu-item-primary" data-action="activate-pending" data-emp="${e.id}">Kích hoạt ngay</button>
-            <button class="menu-item menu-item-danger" data-action="revoke" data-emp="${e.id}">Hủy cấp phát (Thu hồi)</button>
-          </div>
-        </div>
-      `;
-    } else if (e.accountStatus === 'Active') {
-      return `
-        <div class="action-dropdown-wrap">
-          <button class="btn btn-outline btn-xs" data-action="handover" data-emp="${e.id}">Bàn giao</button>
-          <button class="btn-more-dots" data-toggle-menu="${e.id}">•••</button>
-          <div class="menu-popover" id="menu-${e.id}" style="display: none;">
-            <button class="menu-item" data-action="view-drawer" data-emp="${e.id}">Xem chi tiết</button>
-            <button class="menu-item menu-item-warn" data-action="suspend" data-emp="${e.id}">Tạm khóa</button>
-            <button class="menu-item menu-item-danger" data-action="revoke" data-emp="${e.id}">Thu hồi tài khoản</button>
-          </div>
-        </div>
-      `;
-    } else if (e.accountStatus === 'Suspended') {
-      return `
-        <div class="action-dropdown-wrap">
-          <button class="btn btn-outline btn-xs" data-action="unlock" data-emp="${e.id}">Mở khóa</button>
-          <button class="btn-more-dots" data-toggle-menu="${e.id}">•••</button>
-          <div class="menu-popover" id="menu-${e.id}" style="display: none;">
-            <button class="menu-item" data-action="view-drawer" data-emp="${e.id}">Xem chi tiết</button>
-            <button class="menu-item menu-item-disabled" title="Bắt buộc phải mở khóa tài khoản trước khi bàn giao">Bàn giao (Khóa)</button>
-            <button class="menu-item menu-item-danger" data-action="revoke" data-emp="${e.id}">Thu hồi tài khoản</button>
-          </div>
-        </div>
-      `;
-    } else {
-      return `
-        <button class="btn btn-outline btn-xs" data-action="view-drawer" data-emp="${e.id}">Chi tiết</button>
-      `;
-    }
-  }
-
-  function renderUnassignedPoolSection(revokedList, unassignedList) {
-    return `
-      <div class="unassigned-pool-card mb-20">
-        <div class="pool-card-header">
-          <div class="pool-header-titles">
-            <div class="badge-priority-leads">ƯU TIÊN SỐ 1 • BẢO TỒN LEADS</div>
-            <h3 class="pool-title">Tài khoản đã thu hồi sẵn sàng tái cấp</h3>
-            <span class="pool-subtitle">
-              Các tài khoản Zalo Enterprise đã thu hồi và đang lưu giữ danh bạ/leads khách hàng chưa được bàn giao. Ưu tiên tái cấp cho nhân sự mới để khai thác tiếp.
-            </span>
-          </div>
-          <span class="pool-counter-tag">${revokedList.length} tài khoản trong kho</span>
-        </div>
-
-        ${revokedList.length === 0 ? `
-          <div class="empty-state-box">Hiện không có tài khoản nào đã thu hồi trong kho thuộc chi nhánh này.</div>
-        ` : `
-          <div class="table-responsive">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width: 170px;">MÃ ACCOUNT</th>
-                  <th style="width: 160px;">CHI NHÁNH</th>
-                  <th style="width: 140px;">NGÀY THU HỒI</th>
-                  <th style="width: 220px;">CHỦ SỞ HỮU CŨ</th>
-                  <th style="width: 160px; text-align: center;">LEADS KHÁCH HÀNG</th>
-                  <th style="width: 220px;">GHI CHÚ / KHÁCH HÀNG</th>
-                  <th style="width: 130px; text-align: right;">THAO TÁC</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${revokedList.map(r => `
-                  <tr>
-                    <td><strong class="zalo-id-text">${r.accountId}</strong></td>
-                    <td>${escapeHtml(r.branchName)} <span class="branch-code-badge">${r.branchId}</span></td>
-                    <td>${r.revokedAt}</td>
-                    <td>
-                      <div class="emp-text-group">
-                        <span class="font-semibold">${escapeHtml(r.previousOwnerName)}</span>
-                        <span class="emp-sub-text">${escapeHtml(r.previousOwnerEmail)}</span>
-                      </div>
-                    </td>
-                    <td style="text-align: center;">
-                      <span class="lead-count-badge">★ ${r.leadCount} Leads</span>
-                    </td>
-                    <td><span class="text-secondary text-sm">${escapeHtml(r.note)}</span></td>
-                    <td style="text-align: right;">
-                      <button class="btn btn-primary btn-xs" data-action="reassign-revoked" data-account="${r.accountId}">
-                        Tái cấp ngay ➔
-                      </button>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        `}
-      </div>
-
-      <div class="unassigned-pool-card">
-        <div class="pool-card-header">
-          <div class="pool-header-titles">
-            <h3 class="pool-title">Nhân sự chưa có tài khoản Zalo Enterprise</h3>
-            <span class="pool-subtitle">Danh sách nhân viên đang công tác nhưng chưa được phân bổ tài khoản làm việc.</span>
-          </div>
-          <span class="pool-counter-tag">${unassignedList.length} nhân sự chờ cấp</span>
-        </div>
-
-        ${unassignedList.length === 0 ? `
-          <div class="empty-state-box">Tất cả nhân sự trong phạm vi đã được cấp tài khoản đầy đủ.</div>
-        ` : `
-          <div class="table-responsive">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width: 260px;">NHÂN VIÊN</th>
-                  <th style="width: 180px;">CHI NHÁNH</th>
-                  <th style="width: 140px;">MÃ NHÂN VIÊN</th>
-                  <th style="width: 200px;">EMAIL DOANH NGHIỆP</th>
-                  <th style="width: 140px;">TRẠNG THÁI</th>
-                  <th style="width: 140px; text-align: right;">THAO TÁC</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${unassignedList.map(e => `
-                  <tr class="table-row-clickable" data-open-drawer="${e.id}">
-                    <td>
-                      <div class="emp-profile-cell">
-                        <div class="emp-avatar-circle">${getInitials(e.name)}</div>
-                        <span class="emp-name-text">${escapeHtml(e.name)}</span>
-                      </div>
-                    </td>
-                    <td>${escapeHtml(e.branchName)} <span class="branch-code-badge">${e.branchId}</span></td>
-                    <td>${e.code}</td>
-                    <td>${escapeHtml(e.email)}</td>
-                    <td><span class="account-badge badge-unassigned">Chưa cấp</span></td>
-                    <td style="text-align: right;" onclick="event.stopPropagation();">
-                      <button class="btn btn-primary btn-xs" data-action="assign" data-emp="${e.id}">Cấp account</button>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        `}
-      </div>
+      <button class="h-9 px-3 bg-red-50 text-red-700 hover:bg-red-100 border border-red-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openReclaimModal('${acc.id}')">
+        <span class="material-symbols-outlined text-[15px]">undo</span>
+        <span>Thu hồi</span>
+      </button>
     `;
+    return;
   }
+}
 
-    function attachQuotaViewListeners(container) {
-    const searchInput = document.getElementById('quota-search-input');
-    if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
-        state.quotaFilters.search = e.target.value;
-        if (state.quotaPagination) state.quotaPagination.page = 1;
-        renderApp();
+// -----------------------------------------------------------------
+// Action Modals: Assign, Handover, Lock, Unlock, Reclaim, Reset Pass, Allocate Quota, Transfer Quota, Sync Zalo
+// -----------------------------------------------------------------
+
+// Helper to append system audit log
+function addAuditLog(action, target, detail) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const timeStr = `${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  
+  const actorName = AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : `Admin (${AppState.activeBranchScope})`;
+  const actorRole = AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin chi nhánh';
+
+  AppState.auditLogs.unshift({
+    id: `LOG-${String(AppState.auditLogs.length + 1).padStart(3, '0')}`,
+    timestamp: timeStr,
+    actor: actorName,
+    role: actorRole,
+    action,
+    target,
+    detail
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OWNERSHIP HISTORY AUDIT TRAIL (Tra cứu lịch sử các đời nhân viên sử dụng)
+// ─────────────────────────────────────────────────────────────────────────────
+function openOwnershipHistoryModal(accountId) {
+  const acc = AppState.accounts.find(a => a.id === accountId);
+  if (!acc) return;
+
+  document.getElementById('modal-history-acc-id').innerText = acc.id;
+  document.getElementById('modal-history-cur-status').innerText = acc.status;
+
+  const tbody = document.getElementById('modal-history-tbody');
+  tbody.innerHTML = '';
+
+  const history = acc.ownershipHistory || [];
+
+  if (history.length === 0 && !acc.formerOwner) {
+    tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-400 italic">Tài khoản này chưa có tiền sử thu hồi / chuyển nhượng qua các đời nhân sự.</td></tr>`;
+  } else {
+    // Combine current formerOwner if exists
+    let list = [...history];
+    if (acc.formerOwner && !list.some(h => h.email === acc.formerOwner.email)) {
+      list.unshift({
+        generation: list.length + 1,
+        name: acc.formerOwner.name,
+        email: acc.formerOwner.email,
+        code: acc.formerOwner.code || '—',
+        dept: acc.formerOwner.dept || 'Kinh doanh',
+        branch: acc.formerOwner.branch || acc.branch,
+        fromDate: '15/08/2026',
+        toDate: acc.formerOwner.reclaimedDate || '26/09/2026',
+        reclaimedDate: acc.formerOwner.reclaimedDate || '26/09/2026',
+        reclaimedBy: acc.formerOwner.reclaimedBy || 'Super Admin',
+        reason: acc.formerOwner.reason || 'Thu hồi về Kho trung tâm'
       });
     }
 
-    const regSelect = document.getElementById('quota-region-select');
-    if (regSelect) {
-      regSelect.addEventListener('change', (e) => {
-        state.quotaFilters.region = e.target.value;
-        state.quotaFilters.branch = 'ALL';
-        state.quotaFilters.advAccountStatus = 'ALL';
-        state.quotaFilters.advAttentionType = 'ALL';
-        state.quotaFilters.advancedOpen = false;
-        if (state.quotaPagination) state.quotaPagination.page = 1;
-        saveState();
-        renderApp();
-      });
-    }
+    list.forEach((item, idx) => {
+      const tr = document.createElement('tr');
+      tr.className = 'hover:bg-slate-50 border-b border-outline-variant/30 text-xs';
+      tr.innerHTML = `
+        <td class="py-2.5 px-3 font-bold text-center text-primary font-mono">Đời ${list.length - idx}</td>
+        <td class="py-2.5 px-3">
+          <div class="font-bold text-on-surface">${item.name}</div>
+          <div class="text-[10px] text-slate-400 font-mono">${item.code || '—'}</div>
+        </td>
+        <td class="py-2.5 px-3 font-mono text-slate-600">${item.email}</td>
+        <td class="py-2.5 px-3">${item.branch}</td>
+        <td class="py-2.5 px-3 text-slate-500 font-mono">${item.fromDate || '15/08/2026'} → ${item.toDate || item.reclaimedDate}</td>
+        <td class="py-2.5 px-3">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200">
+            ${item.reason || 'Thu hồi tài khoản'}
+          </span>
+          <div class="text-[10px] text-slate-400 mt-0.5 font-mono">Bởi: ${item.reclaimedBy || 'Super Admin'}</div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
 
-    const branchSelect = document.getElementById('quota-branch-select');
+  document.getElementById('modal-ownership-history').classList.remove('hidden');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNIFIED ASSIGN / PROVISION MODAL (Refined Enterprise Design)
+// ─────────────────────────────────────────────────────────────────────────────
+let gTargetAssignAccount = null;
+
+function openAssignModal(accountId) {
+  openAssignAccountModal(accountId);
+}
+
+function openTopProvisionModal() {
+  openAssignAccountModal(null);
+}
+
+function openAssignAccountModal(accountId = null) {
+  let targetAccount = null;
+  const isBranchAdmin = AppState.currentRole === 'BRANCH_ADMIN';
+  let availableAccounts = [];
+
+  // Determine available accounts
+  if (isBranchAdmin) {
+    availableAccounts = AppState.accounts.filter(a => a.branch === AppState.activeBranchScope && (a.ownerName === null || a.status === 'UNASSIGNED'));
+  } else {
+    // Super Admin: All unassigned accounts
+    availableAccounts = AppState.accounts.filter(a => a.ownerName === null || a.status === 'UNASSIGNED');
+  }
+
+  const readonlyWrapAcc = document.getElementById('modal-provision-acc-readonly-wrap');
+  const selectWrapAcc = document.getElementById('modal-provision-acc-select-wrap');
+  const accSelect = document.getElementById('modal-provision-acc-select');
+
+  if (accountId) {
+    targetAccount = AppState.accounts.find(a => a.id === accountId);
+    if (readonlyWrapAcc) readonlyWrapAcc.classList.remove('hidden');
+    if (selectWrapAcc) selectWrapAcc.classList.add('hidden');
+  } else {
+    if (availableAccounts.length === 0) {
+      alert('Không còn tài khoản khả dụng để gán! Vui lòng thu hồi tài khoản không dùng trước.');
+      return;
+    }
+    targetAccount = availableAccounts[0]; // Default to first available
+
+    if (readonlyWrapAcc) readonlyWrapAcc.classList.add('hidden');
+    if (selectWrapAcc) selectWrapAcc.classList.remove('hidden');
+
+    // Populate Account ID select
+    if (accSelect) {
+      accSelect.innerHTML = '';
+      availableAccounts.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.innerText = `${a.id} (${a.branch})`;
+        accSelect.appendChild(opt);
+      });
+      accSelect.value = targetAccount.id;
+    }
+  }
+
+  if (!targetAccount) {
+    alert('Không tìm thấy tài khoản để gán.');
+    return;
+  }
+
+  gTargetAssignAccount = targetAccount;
+
+  // Set Account ID in header (for readonly mode)
+  const accIdEl = document.getElementById('modal-provision-acc-id');
+  if (accIdEl) accIdEl.innerText = targetAccount.id;
+
+  const poolTag = document.getElementById('modal-provision-pool-tag');
+  if (poolTag) {
+    if (targetAccount.isReclaimed) {
+      poolTag.innerText = 'Đã thu hồi - Sẵn sàng gán';
+      poolTag.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200';
+    } else {
+      poolTag.innerText = 'Chưa phân bổ';
+      poolTag.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200';
+    }
+  }
+
+  renderProvisionBranchUI();
+
+  // Reset Combobox & Display Name
+  clearProvisionCombobox();
+  document.getElementById('modal-provision-display-name').value = '';
+
+  document.getElementById('modal-top-provision').classList.remove('hidden');
+}
+
+function onProvisionAccChanged(accId) {
+  const target = AppState.accounts.find(a => a.id === accId);
+  if (target) {
+    gTargetAssignAccount = target;
+    renderProvisionBranchUI();
+    clearProvisionCombobox();
+  }
+}
+
+function renderProvisionBranchUI() {
+  if (!gTargetAssignAccount) return;
+  const targetAccount = gTargetAssignAccount;
+  
+  // Branch Handling
+  const isFromCentralPool = targetAccount.branch === 'Kho trung tâm';
+  const readonlyWrap = document.getElementById('modal-provision-branch-readonly-wrap');
+  const selectWrap = document.getElementById('modal-provision-branch-select-wrap');
+  const branchLabel = document.getElementById('modal-provision-branch-label');
+  const branchReadonly = document.getElementById('modal-provision-branch-readonly');
+  const branchSelect = document.getElementById('modal-provision-branch-select');
+
+  if (isFromCentralPool && AppState.currentRole === 'SUPER_ADMIN') {
+    if (branchLabel) branchLabel.innerText = 'Chi nhánh nhận tài khoản';
+    if (readonlyWrap) readonlyWrap.classList.add('hidden');
+    if (selectWrap) selectWrap.classList.remove('hidden');
+
+    // Populate branches
     if (branchSelect) {
-      branchSelect.addEventListener('change', (e) => {
-        state.quotaFilters.branch = e.target.value;
-        if (state.quotaPagination) state.quotaPagination.page = 1;
-        saveState();
-        renderApp();
-      });
-    }
-
-    const resetBtn = document.getElementById('btn-reset-quota-filters');
-    if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
-        state.quotaFilters.search = '';
-        state.quotaFilters.region = 'ALL';
-        state.quotaFilters.branch = 'ALL';
-        if (state.quotaPagination) state.quotaPagination.page = 1;
-        saveState();
-        renderApp();
-      });
-    }
-
-    container.querySelectorAll('.quota-tabs-bar .tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tab = btn.getAttribute('data-tab');
-        state.quotaFilters.activeTab = tab;
-        if (state.quotaPagination) state.quotaPagination.page = 1;
-        saveState();
-        renderApp();
-      });
-    });
-
-    // Checkbox chọn tất cả trên trang
-    const selectAllCheck = document.getElementById('quota-select-all');
-    if (selectAllCheck) {
-      selectAllCheck.addEventListener('change', (e) => {
-        const pageCheckboxes = container.querySelectorAll('.quota-row-check');
-        if (e.target.checked) {
-          pageCheckboxes.forEach(cb => {
-            const empId = cb.getAttribute('data-emp');
-            if (!state.selectedBulkIds.includes(empId)) {
-              state.selectedBulkIds.push(empId);
-            }
-          });
-        } else {
-          pageCheckboxes.forEach(cb => {
-            const empId = cb.getAttribute('data-emp');
-            state.selectedBulkIds = state.selectedBulkIds.filter(id => id !== empId);
-          });
-        }
-        renderApp();
-      });
-    }
-
-    // Checkbox từng dòng
-    container.querySelectorAll('.quota-row-check').forEach(cb => {
-      cb.addEventListener('click', (e) => {
-        e.stopPropagation();
-      });
-      cb.addEventListener('change', (e) => {
-        const empId = cb.getAttribute('data-emp');
-        if (e.target.checked) {
-          if (!state.selectedBulkIds.includes(empId)) state.selectedBulkIds.push(empId);
-        } else {
-          state.selectedBulkIds = state.selectedBulkIds.filter(id => id !== empId);
-        }
-        updateBulkBar();
-        // Cập nhật class row
-        const row = cb.closest('tr');
-        if (row) {
-          if (e.target.checked) row.classList.add('row-selected');
-          else row.classList.remove('row-selected');
-        }
-      });
-    });
-
-    // Pagination listeners
-    const pageSizeSelect = document.getElementById('quota-page-size-select');
-    if (pageSizeSelect) {
-      pageSizeSelect.addEventListener('change', (e) => {
-        state.quotaPagination.pageSize = parseInt(e.target.value, 10);
-        state.quotaPagination.page = 1;
-        saveState();
-        renderApp();
-      });
-    }
-
-    const btnPrev = document.getElementById('pagination-btn-prev');
-    if (btnPrev) {
-      btnPrev.addEventListener('click', () => {
-        if (state.quotaPagination.page > 1) {
-          state.quotaPagination.page--;
-          saveState();
-          renderApp();
-        }
-      });
-    }
-
-    const btnNext = document.getElementById('pagination-btn-next');
-    if (btnNext) {
-      btnNext.addEventListener('click', () => {
-        state.quotaPagination.page++;
-        saveState();
-        renderApp();
-      });
-    }
-
-    container.querySelectorAll('.pagination-page-btn[data-page]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const p = parseInt(btn.getAttribute('data-page'), 10);
-        state.quotaPagination.page = p;
-        saveState();
-        renderApp();
-      });
-    });
-
-    // Row drawer click
-    container.querySelectorAll('[data-open-drawer]').forEach(row => {
-      row.addEventListener('click', () => {
-        const empId = row.getAttribute('data-open-drawer');
-        openSideDrawer(empId);
-      });
-    });
-
-    // Row actions
-    container.querySelectorAll('[data-action]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const action = btn.getAttribute('data-action');
-        const empId = btn.getAttribute('data-emp');
-        const accId = btn.getAttribute('data-account');
-
-        if (action === 'assign') {
-          openAssignModal(empId);
-        } else if (action === 'reassign-revoked') {
-          openReassignRevokedModal(accId);
-        } else if (action === 'remind-pending') {
-          const emp = state.employees.find(e => e.id === empId);
-          if (emp) {
-            state.auditLogs.unshift({
-              id: `LOG-${Date.now().toString().slice(-4)}`,
-              timestamp: '25/09/2026 14:22',
-              actor: getActorName(),
-              action: 'Nhắc nhở kích hoạt tài khoản',
-              target: `${emp.name} (${emp.accountId})`,
-              branch: `${emp.branchName} (${emp.branchId})`,
-              impact: `Đã gửi thông báo SMS & Email nhắc nhở đăng nhập kích hoạt Zalo Enterprise tới ${emp.email}`
-            });
-            state.selectedDrawerId = emp.id;
-            saveState();
-            showToast(`Đã gửi thông báo nhắc kích hoạt tài khoản ${emp.accountId} tới email ${emp.email}`, 'success');
-            renderApp();
-            openSideDrawer(emp.id);
-          }
-        } else if (action === 'activate-pending') {
-          const emp = state.employees.find(e => e.id === empId);
-          if (emp) {
-            emp.accountStatus = 'Active';
-            emp.attentionReason = null;
-            emp.pendingOverdue = false;
-            state.auditLogs.unshift({
-              id: `LOG-${Date.now().toString().slice(-4)}`,
-              timestamp: '25/09/2026 14:23',
-              actor: getActorName(),
-              action: 'Kích hoạt tài khoản Zalo',
-              target: `${emp.name} (${emp.accountId})`,
-              branch: `${emp.branchName} (${emp.branchId})`,
-              impact: 'Nhân sự đã hoàn tất đăng nhập, tài khoản chuyển sang Đang hoạt động'
-            });
-            state.selectedDrawerId = emp.id;
-            saveState();
-            showToast(`Tài khoản ${emp.accountId} của ${emp.name} đã được kích hoạt thành công`, 'success');
-            renderApp();
-            openSideDrawer(emp.id);
-          }
-        } else if (action === 'handover') {
-          openHandoverModal(empId);
-        } else if (action === 'suspend') {
-          openSuspendModal(empId);
-        } else if (action === 'unlock') {
-          openUnlockModal(empId);
-        } else if (action === 'revoke') {
-          openRevokeModal(empId);
-        } else if (action === 'view-drawer') {
-          openSideDrawer(empId);
-        }
-      });
-    });
-
-    container.querySelectorAll('[data-toggle-menu]').forEach(dots => {
-      dots.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = dots.getAttribute('data-toggle-menu');
-        const menu = document.getElementById(`menu-${id}`);
-        document.querySelectorAll('.menu-popover').forEach(m => {
-          if (m !== menu) m.style.display = 'none';
+      branchSelect.innerHTML = '';
+      AppState.regions.forEach(r => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = r.name;
+        r.branches.forEach(b => {
+          const opt = document.createElement('option');
+          opt.value = b.name;
+          opt.innerText = b.name;
+          optgroup.appendChild(opt);
         });
-        if (menu) {
-          menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-        }
-      });
-    });
-
-    document.addEventListener('click', () => {
-      document.querySelectorAll('.menu-popover').forEach(m => m.style.display = 'none');
-    });
-
-    const topAssignBtn = document.getElementById('btn-open-assign-new');
-    if (topAssignBtn) {
-      topAssignBtn.addEventListener('click', () => {
-        openAssignModal();
+        branchSelect.appendChild(optgroup);
       });
     }
+  } else {
+    // Fixed branch
+    const fixedBranch = isFromCentralPool ? AppState.activeBranchScope : targetAccount.branch;
+    if (branchLabel) branchLabel.innerText = 'Chi nhánh quản lý';
+    if (readonlyWrap) readonlyWrap.classList.remove('hidden');
+    if (selectWrap) selectWrap.classList.add('hidden');
+    if (branchReadonly) branchReadonly.value = `${fixedBranch} (${targetAccount.region !== 'Toàn quốc' ? targetAccount.region : 'Vùng 1 - Hà Nội'})`;
+  }
+}
+
+function getActiveProvisionBranch() {
+  if (!gTargetAssignAccount) return 'Chi nhánh Ba Đình';
+  const isFromCentralPool = gTargetAssignAccount.branch === 'Kho trung tâm';
+  if (isFromCentralPool && AppState.currentRole === 'SUPER_ADMIN') {
+    const sel = document.getElementById('modal-provision-branch-select');
+    return sel ? sel.value : 'Chi nhánh Ba Đình';
+  }
+  return isFromCentralPool ? AppState.activeBranchScope : gTargetAssignAccount.branch;
+}
+
+function onProvisionBranchChanged(branchName) {
+  clearProvisionCombobox();
+}
+
+// ── Searchable Combobox Logic ──
+function openProvisionCombobox() {
+  renderProvisionComboboxList('');
+  const dropdown = document.getElementById('modal-provision-emp-dropdown');
+  if (dropdown) dropdown.classList.remove('hidden');
+}
+
+function onProvisionComboboxInput(keyword) {
+  const clearBtn = document.getElementById('modal-provision-emp-clear');
+  if (clearBtn) {
+    if (keyword.length > 0) clearBtn.classList.remove('hidden');
+    else clearBtn.classList.add('hidden');
   }
 
-  // =========================================================================
-  // 5C. FLOATING BULK ACTIONS CONTROLLER (THAO TÁC HÀNG LOẠT)
-  // =========================================================================
+  // Clear hidden values if user edits text
+  document.getElementById('modal-provision-selected-code').value = '';
+  document.getElementById('modal-provision-selected-name').value = '';
+  document.getElementById('modal-provision-selected-email').value = '';
+  document.getElementById('modal-provision-selected-dept').value = '';
 
-  function updateBulkBar() {
-    const bar = document.getElementById('floating-bulk-bar');
-    const counterText = document.getElementById('bulk-selected-count');
-    if (!bar) return;
+  renderProvisionComboboxList(keyword);
+  const dropdown = document.getElementById('modal-provision-emp-dropdown');
+  if (dropdown) dropdown.classList.remove('hidden');
+}
 
-    if (!state.selectedBulkIds) state.selectedBulkIds = [];
-    const count = state.selectedBulkIds.length;
+function clearProvisionCombobox() {
+  const input = document.getElementById('modal-provision-emp-input');
+  if (input) input.value = '';
+  const clearBtn = document.getElementById('modal-provision-emp-clear');
+  if (clearBtn) clearBtn.classList.add('hidden');
 
-    if (count > 0 && state.activeView === 'quota') {
-      bar.style.display = 'block';
-      if (counterText) counterText.textContent = `Đã chọn ${count} nhân sự`;
+  document.getElementById('modal-provision-selected-code').value = '';
+  document.getElementById('modal-provision-selected-name').value = '';
+  document.getElementById('modal-provision-selected-email').value = '';
+  document.getElementById('modal-provision-selected-dept').value = '';
+
+  const dropdown = document.getElementById('modal-provision-emp-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+}
+
+function renderProvisionComboboxList(keyword = '') {
+  const dropdown = document.getElementById('modal-provision-emp-dropdown');
+  if (!dropdown) return;
+  dropdown.innerHTML = '';
+
+  const branch = getActiveProvisionBranch();
+  const kw = keyword.toLowerCase().trim();
+
+  // Get active accounts emails to avoid duplicates
+  const assignedEmails = new Set(
+    AppState.accounts.filter(a => a.ownerEmail && a.status !== 'UNASSIGNED').map(a => a.ownerEmail)
+  );
+
+  // Filter eligible employees:
+  // 1. status === 'ACTIVE'
+  // 2. has corporate email (@fpt.com)
+  // 3. no active Zalo Enterprise account
+  // 4. belongs to current branch
+  // 5. matches search keyword (name or email or code)
+  const eligible = AppState.hrEmployees.filter(emp => {
+    if (emp.status !== 'ACTIVE') return false;
+    if (!emp.email || !emp.email.endsWith('@fpt.com')) return false;
+    if (assignedEmails.has(emp.email)) return false;
+    if (branch && emp.branch !== branch) return false;
+    if (kw) {
+      const matchName = emp.name.toLowerCase().includes(kw);
+      const matchEmail = emp.email.toLowerCase().includes(kw);
+      const matchCode = emp.code.toLowerCase().includes(kw);
+      return matchName || matchEmail || matchCode;
+    }
+    return true;
+  });
+
+  if (eligible.length === 0) {
+    dropdown.innerHTML = `<div class="p-3 text-center text-slate-400 text-xs italic">Không tìm thấy nhân sự phù hợp tại ${branch || 'chi nhánh này'}</div>`;
+    return;
+  }
+
+  eligible.forEach(emp => {
+    const item = document.createElement('div');
+    item.className = 'p-2.5 hover:bg-primary/5 cursor-pointer transition-colors';
+    item.onclick = () => selectProvisionEmployee(emp);
+    item.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="font-bold text-on-surface text-xs">${emp.name}</div>
+        <span class="text-[10px] font-mono text-slate-400">${emp.code}</span>
+      </div>
+      <div class="text-[11px] text-slate-500 font-mono mt-0.5">${emp.email} <span class="text-slate-300">•</span> ${emp.dept || 'Kinh doanh'}</div>
+    `;
+    dropdown.appendChild(item);
+  });
+}
+
+function selectProvisionEmployee(emp) {
+  const input = document.getElementById('modal-provision-emp-input');
+  if (input) input.value = `${emp.name} (${emp.email})`;
+
+  document.getElementById('modal-provision-selected-code').value = emp.code;
+  document.getElementById('modal-provision-selected-name').value = emp.name;
+  document.getElementById('modal-provision-selected-email').value = emp.email;
+  document.getElementById('modal-provision-selected-dept').value = emp.dept || 'Kinh doanh Khách hàng';
+
+  // Auto-fill Display Name
+  const dispNameInput = document.getElementById('modal-provision-display-name');
+  if (dispNameInput) dispNameInput.value = emp.name;
+
+  const clearBtn = document.getElementById('modal-provision-emp-clear');
+  if (clearBtn) clearBtn.classList.remove('hidden');
+
+  const dropdown = document.getElementById('modal-provision-emp-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+}
+
+// Close combobox when clicking outside
+document.addEventListener('click', (e) => {
+  const wrapper = document.getElementById('provision-combobox-wrapper');
+  const dropdown = document.getElementById('modal-provision-emp-dropdown');
+  if (wrapper && dropdown && !wrapper.contains(e.target)) {
+    dropdown.classList.add('hidden');
+  }
+});
+
+function submitTopProvision() {
+  const name = document.getElementById('modal-provision-selected-name').value;
+  const email = document.getElementById('modal-provision-selected-email').value;
+  const code = document.getElementById('modal-provision-selected-code').value;
+  const dept = document.getElementById('modal-provision-selected-dept').value || 'Kinh doanh Khách hàng';
+  const displayName = document.getElementById('modal-provision-display-name').value.trim() || name;
+
+  if (!name || !email) {
+    alert('Vui lòng chọn một nhân viên từ danh sách gợi ý!');
+    return;
+  }
+
+  const targetAccount = gTargetAssignAccount;
+  if (!targetAccount) {
+    alert('Không tìm thấy thông tin tài khoản cần gán!');
+    return;
+  }
+
+  const branchName = getActiveProvisionBranch();
+
+  // Archive formerOwner into ownershipHistory
+  if (!targetAccount.ownershipHistory) targetAccount.ownershipHistory = [];
+  if (targetAccount.formerOwner) {
+    targetAccount.ownershipHistory.unshift({
+      generation: targetAccount.ownershipHistory.length + 1,
+      name: targetAccount.formerOwner.name,
+      email: targetAccount.formerOwner.email,
+      code: targetAccount.formerOwner.code || '—',
+      dept: targetAccount.formerOwner.dept || 'Kinh doanh',
+      branch: targetAccount.formerOwner.branch || targetAccount.branch,
+      phone: targetAccount.formerOwner.phone || '—',
+      fromDate: '15/08/2026',
+      toDate: targetAccount.formerOwner.reclaimedDate || '26/09/2026',
+      reclaimedDate: targetAccount.formerOwner.reclaimedDate || '26/09/2026',
+      reclaimedBy: targetAccount.formerOwner.reclaimedBy || 'Super Admin',
+      reason: targetAccount.formerOwner.reason || 'Thu hồi về Kho trung tâm'
+    });
+    targetAccount.formerOwner = null;
+  }
+
+  // Clear reclaimed flag completely
+  targetAccount.isReclaimed = false;
+
+  targetAccount.ownerName = name;
+  targetAccount.displayName = displayName;
+  targetAccount.username = email.split('@')[0];
+  targetAccount.ownerEmail = email;
+  targetAccount.empCode = code;
+  targetAccount.empDept = dept;
+  targetAccount.empPhone = '098' + (Math.floor(Math.random()*899)+100) + '.345';
+  targetAccount.empStatus = 'Chính thức';
+  targetAccount.status = 'PENDING'; // Chờ kích hoạt
+  targetAccount.branch = branchName;
+  const reg = AppState.regions.find(r => r.branches.some(b => b.name === branchName));
+  targetAccount.region = reg ? reg.name : 'Vùng 1 - Hà Nội';
+  targetAccount.assignedDate = new Date().toLocaleDateString('vi-VN');
+  targetAccount.attention = null;
+
+  targetAccount.history.unshift({
+    from: 'Kho trung tâm',
+    to: name,
+    date: new Date().toLocaleString('vi-VN'),
+    by: AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin chi nhánh'
+  });
+
+  addAuditLog('Gán tài khoản', targetAccount.id, `Gán tài khoản cho nhân sự ${name} (${email}) tại ${branchName}, trạng thái Chờ kích hoạt`);
+  recalculateRegionCounts();
+
+  closeModal('modal-top-provision');
+  openDrawer(targetAccount.id);
+  renderAccounts();
+  renderOverview();
+  alert(`Gán thành công tài khoản ${targetAccount.id} cho nhân viên ${name} (${email})!`);
+}
+
+
+// 2. Handover Account
+function openHandoverModal(accountId) {
+  const acc = AppState.accounts.find(a => a.id === accountId);
+  if (!acc) return;
+
+  document.getElementById('modal-handover-acc-id').innerText = acc.id;
+  document.getElementById('modal-handover-current-owner').innerText = `${acc.ownerName} (${acc.ownerEmail})`;
+  document.getElementById('modal-handover-branch').innerText = acc.branch;
+
+  // New employee select
+  const empSelect = document.getElementById('modal-handover-employee-select');
+  empSelect.innerHTML = '<option value="">-- Chọn nhân viên tiếp nhận --</option>';
+
+  AppState.hrEmployees.forEach(emp => {
+    const hasAccount = AppState.accounts.some(a => a.ownerEmail === emp.email);
+    if (!hasAccount && emp.email !== acc.ownerEmail) {
+      empSelect.innerHTML += `<option value="${emp.code}" data-name="${emp.name}" data-email="${emp.email}">${emp.name} (${emp.email}) - ${emp.branch}</option>`;
+    }
+  });
+
+  document.getElementById('modal-handover').classList.remove('hidden');
+}
+
+function submitHandover() {
+  const accId = document.getElementById('modal-handover-acc-id').innerText;
+  const empSelect = document.getElementById('modal-handover-employee-select');
+  const selectedOpt = empSelect.selectedOptions[0];
+
+  if (!selectedOpt || !selectedOpt.value) {
+    alert('Vui lòng chọn nhân viên tiếp nhận!');
+    return;
+  }
+
+  const newName = selectedOpt.getAttribute('data-name');
+  const newEmail = selectedOpt.getAttribute('data-email');
+
+  const acc = AppState.accounts.find(a => a.id === accId);
+  if (acc) {
+    const oldName = acc.ownerName;
+    acc.ownerName = newName;
+    acc.displayName = newName;
+    acc.username = newEmail.split('@')[0];
+    acc.ownerEmail = newEmail;
+    acc.assignedDate = '27/09/2026';
+    acc.history.unshift({
+      from: oldName,
+      to: newName,
+      date: '27/09/2026 10:00',
+      by: AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin chi nhánh'
+    });
+
+    addAuditLog('Bàn giao tài khoản', acc.id, `Bàn giao từ ${oldName} sang ${newName} (${newEmail}), giữ nguyên dữ liệu và Account ID`);
+  }
+
+  closeModal('modal-handover');
+  openDrawer(accId);
+  renderAccounts();
+}
+
+// 3. Lock & Unlock
+function openLockModal(accountId, isLocking) {
+  const acc = AppState.accounts.find(a => a.id === accountId);
+  if (!acc) return;
+
+  document.getElementById('modal-lock-acc-id').innerText = acc.id;
+  document.getElementById('modal-lock-action-title').innerText = isLocking ? 'Xác nhận tạm khóa tài khoản' : 'Xác nhận mở khóa tài khoản';
+  document.getElementById('modal-lock-desc').innerText = isLocking 
+    ? `Tạm khóa tài khoản ${acc.id} (${acc.ownerName}). Quota của chi nhánh và thông tin người dùng vẫn được bảo lưu.`
+    : `Mở khóa tài khoản ${acc.id} (${acc.ownerName}). Tài khoản sẽ chuyển lại trạng thái Đang hoạt động bình thường.`;
+
+  document.getElementById('modal-lock-btn').innerText = isLocking ? 'Xác nhận tạm khóa' : 'Xác nhận mở khóa';
+  document.getElementById('modal-lock-btn').className = isLocking 
+    ? 'px-3 py-1.5 rounded text-white bg-amber-600 hover:bg-amber-700 text-xs font-semibold cursor-pointer'
+    : 'px-3 py-1.5 rounded text-white bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold cursor-pointer';
+
+  document.getElementById('modal-lock-btn').onclick = () => {
+    if (isLocking) {
+      acc.status = 'LOCKED';
+      addAuditLog('Tạm khóa', acc.id, `Tạm khóa tài khoản của ${acc.ownerName}, giữ quota đơn vị`);
     } else {
-      bar.style.display = 'none';
-    }
-  }
-
-  // Setup Global Bulk Action Listeners
-  function setupBulkActionListeners() {
-    const btnDeselect = document.getElementById('bulk-btn-deselect');
-    if (btnDeselect) {
-      btnDeselect.addEventListener('click', () => {
-        state.selectedBulkIds = [];
-        updateBulkBar();
-        renderApp();
-      });
+      acc.status = 'ACTIVE';
+      addAuditLog('Mở khóa', acc.id, `Mở khóa tài khoản, khôi phục trạng thái Đang hoạt động`);
     }
 
-    const btnSuspend = document.getElementById('bulk-btn-suspend');
-    if (btnSuspend) {
-      btnSuspend.addEventListener('click', () => {
-        if (!state.selectedBulkIds || state.selectedBulkIds.length === 0) return;
+    closeModal('modal-lock');
+    openDrawer(acc.id);
+    renderAccounts();
+    renderOverview();
+  };
 
-        const targetEmps = state.employees.filter(e => state.selectedBulkIds.includes(e.id) && e.accountStatus === 'Active');
-        if (targetEmps.length === 0) {
-          showToast('Không có nhân sự nào trong danh sách chọn đang ở trạng thái Hoạt động để tạm khóa', 'warning');
-          return;
-        }
+  document.getElementById('modal-lock').classList.remove('hidden');
+}
 
-        const confirmMsg = `Bạn có chắc muốn TẠM KHÓA ${targetEmps.length} tài khoản Zalo Enterprise đã chọn?`;
-        if (!confirm(confirmMsg)) return;
+// 4. Reclaim Account
+function openReclaimModal(accountId) {
+  const acc = AppState.accounts.find(a => a.id === accountId);
+  if (!acc) return;
 
-        targetEmps.forEach(emp => {
-          emp.accountStatus = 'Suspended';
-          emp.attentionReason = 'Tạm khóa hàng loạt từ Admin Console';
+  document.getElementById('modal-reclaim-acc-id').innerText = acc.id;
+  document.getElementById('modal-reclaim-desc').innerHTML = `
+    Thu hồi tài khoản <strong>${acc.id}</strong> (đang gán cho <strong>${acc.ownerName}</strong>, thuộc <strong>${acc.branch}</strong>).<br><br>
+    <ul class="list-disc pl-4 space-y-1 text-slate-600">
+      <li>Quyền truy cập của nhân viên hiện tại bị vô hiệu hóa ngay lập tức.</li>
+      <li>Quota của ${acc.branch} giảm đi 1.</li>
+      <li>Tài khoản trả về Kho trung tâm (Chưa phân bổ), quota Kho trung tâm tăng 1.</li>
+      <li>Toàn bộ danh bạ và dữ liệu lịch sử của Account ID được giữ nguyên.</li>
+    </ul>
+  `;
 
-          state.auditLogs.unshift({
-            id: `LOG-${Date.now().toString().slice(-4)}`,
-            timestamp: '25/09/2026 14:15',
-            actor: getActorName(),
-            action: 'Tạm khóa tài khoản (Hàng loạt)',
-            target: `${emp.name} (${emp.accountId})`,
-            branch: `${emp.branchName} (${emp.branchId})`,
-            impact: 'Tạm dừng quyền truy cập Zalo (Hàng loạt)'
-          });
-        });
+  document.getElementById('modal-reclaim').classList.remove('hidden');
+}
 
-        state.selectedBulkIds = [];
-        saveState();
-        showToast(`Đã tạm khóa thành công ${targetEmps.length} tài khoản`, 'success');
-        renderApp();
-      });
-    }
+function submitReclaim() {
+  const accId = document.getElementById('modal-reclaim-acc-id').innerText;
+  const acc = AppState.accounts.find(a => a.id === accId);
+  if (acc) {
+    const oldBranch = acc.branch;
+    const oldOwner = acc.ownerName;
 
-    const btnRevoke = document.getElementById('bulk-btn-revoke');
-    if (btnRevoke) {
-      btnRevoke.addEventListener('click', () => {
-        if (!state.selectedBulkIds || state.selectedBulkIds.length === 0) return;
+    // Save former employee details for audit trace & drawer display (CR-001)
+    acc.formerOwner = {
+      name: oldOwner,
+      email: acc.ownerEmail,
+      code: acc.empCode,
+      dept: acc.empDept,
+      branch: oldBranch,
+      phone: acc.empPhone,
+      reclaimedDate: '28/09/2026 11:30',
+      reclaimedBy: AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin chi nhánh'
+    };
 
-        const targetEmps = state.employees.filter(e => state.selectedBulkIds.includes(e.id) && (e.accountStatus === 'Active' || e.accountStatus === 'Suspended'));
-        if (targetEmps.length === 0) {
-          showToast('Không có nhân sự nào trong danh sách chọn có tài khoản Zalo để thu hồi', 'warning');
-          return;
-        }
+    acc.ownerName = null;
+    acc.displayName = null;
+    acc.ownerEmail = null;
+    acc.empCode = null;
+    acc.empDept = null;
+    acc.empPhone = null;
+    acc.empStatus = null;
+    acc.branch = 'Kho trung tâm';
+    acc.region = 'Toàn quốc';
+    acc.status = 'UNASSIGNED';
+    acc.attention = null;
+    acc.assignedDate = null;
+    acc.isReclaimed = true; // Pin to top with badge "Đã thu hồi" (CR-001)
 
-        const confirmMsg = `CẢNH BÁO: Bạn có chắc muốn THU HỒI ${targetEmps.length} tài khoản Zalo Enterprise? Toàn bộ tài khoản và leads sẽ được chuyển về Kho tài khoản chưa cấp.`;
-        if (!confirm(confirmMsg)) return;
-
-        targetEmps.forEach(emp => {
-          const oldAccId = emp.accountId;
-          const oldLeads = emp.leadCount || 0;
-
-          state.revokedAccounts.unshift({
-            accountId: oldAccId,
-            branchId: emp.branchId,
-            branchName: emp.branchName,
-            region: emp.region,
-            revokedAt: '25/09/2026',
-            previousOwnerName: emp.name,
-            previousOwnerEmail: emp.email,
-            leadCount: oldLeads,
-            note: `Thu hồi hàng loạt từ ${emp.name}, bảo tồn ${oldLeads} leads`
-          });
-
-          emp.accountId = null;
-          emp.accountStatus = 'Unassigned';
-          emp.zaloAssignedDate = null;
-          emp.leadCount = 0;
-          emp.lastActiveDate = null;
-          emp.attentionReason = null;
-
-          state.auditLogs.unshift({
-            id: `LOG-${Date.now().toString().slice(-4)}`,
-            timestamp: '25/09/2026 14:16',
-            actor: getActorName(),
-            action: 'Thu hồi tài khoản (Hàng loạt)',
-            target: `${emp.name} (${oldAccId})`,
-            branch: `${emp.branchName} (${emp.branchId})`,
-            impact: `Đưa ${oldAccId} về kho chưa cấp kèm ${oldLeads} leads (Đang dùng -1, Chưa dùng +1)`
-          });
-        });
-
-        state.selectedBulkIds = [];
-        saveState();
-        showToast(`Đã thu hồi thành công ${targetEmps.length} tài khoản`, 'success');
-        renderApp();
-      });
-    }
-
-    const btnExport = document.getElementById('bulk-btn-export');
-    if (btnExport) {
-      btnExport.addEventListener('click', () => {
-        if (!state.selectedBulkIds || state.selectedBulkIds.length === 0) return;
-        const selectedEmps = state.employees.filter(e => state.selectedBulkIds.includes(e.id));
-        exportSelectedCSV(selectedEmps);
-      });
-    }
-  }
-
-  function exportSelectedCSV(emps) {
-    const headers = ['Mã NV', 'Họ Tên', 'Email', 'Chi Nhánh', 'Vùng', 'Tài Khoản Zalo', 'Trạng Thái', 'Leads', 'Ngày Cấp'];
-    const rows = emps.map(e => [
-      e.code,
-      `"${e.name}"`,
-      e.email,
-      `"${e.branchName}"`,
-      e.region,
-      e.accountId || 'Chưa cấp',
-      e.accountStatus,
-      e.leadCount,
-      e.zaloAssignedDate || ''
-    ]);
-
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Z_Enterprise_Selected_Employees_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast(`Đã xuất danh sách ${emps.length} nhân sự đã chọn`, 'success');
-  }
-
-  // =========================================================================
-  // 6. VIEW 3: NHẬT KÝ AUDIT (KIỂM TOÁN CHUẨN 5 CỘT D-020)
-  // =========================================================================
-
-
-  // =========================================================================
-  // 5B. MÀN HÌNH PHÂN BỔ QUOTA THEO ĐƠN VỊ (QUOTA ALLOCATION VIEW)
-  // =========================================================================
-
-    function renderQuotaAllocationView(container) {
-    const isBranchAdmin = state.currentPersona === 'branch_admin';
-
-    // Đồng bộ 100% qua Engine getBranchQuotaStats
-    let totalAllocatedToBranches = 0;
-    let totalUsedActive = 0;
-    let totalUsedPending = 0;
-    let totalUsedSuspended = 0;
-
-    state.orgTree.regions.forEach(r => {
-      r.branches.forEach(b => {
-        const bStats = getBranchQuotaStats(b.id);
-        totalAllocatedToBranches += bStats.totalQuota;
-        totalUsedActive += bStats.active;
-        totalUsedPending += bStats.pending;
-        totalUsedSuspended += bStats.suspended;
-      });
+    acc.history.unshift({
+      from: oldOwner,
+      to: 'Kho trung tâm (Thu hồi)',
+      date: '28/09/2026 10:30',
+      by: AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin chi nhánh'
     });
 
-    const totalInUse = totalUsedActive + totalUsedPending + totalUsedSuspended;
-    const companyReserve = Math.max(0, state.orgTree.totalCompanyQuota - totalAllocatedToBranches);
-    const allocationRate = ((totalAllocatedToBranches / state.orgTree.totalCompanyQuota) * 100).toFixed(1);
+    addAuditLog('Thu hồi', acc.id, `Thu hồi từ ${oldOwner} (${oldBranch}) về Kho trung tâm, quota ${oldBranch} giảm 1`);
+    recalculateRegionCounts();
+  }
 
-    // Tính sức khỏe từng vùng đồng bộ
-    const regionHealthData = state.orgTree.regions.map(reg => {
-      let regAlloc = 0;
-      let regUsed = 0;
-      reg.branches.forEach(b => {
-        const bStats = getBranchQuotaStats(b.id);
-        regAlloc += bStats.totalQuota;
-        regUsed += bStats.inUse;
-      });
-      const util = regAlloc > 0 ? ((regUsed / regAlloc) * 100).toFixed(1) : 0;
-      let statusClass = 'health-good';
-      let badgeClass = 'good';
-      let statusText = '🟢 Ổn định';
-      if (parseFloat(util) >= 90) {
-        statusClass = 'health-danger';
-        badgeClass = 'danger';
-        statusText = '🔴 Chạm trần';
-      } else if (parseFloat(util) >= 80) {
-        statusClass = 'health-warn';
-        badgeClass = 'warn';
-        statusText = '🟡 Cảnh báo';
+  closeModal('modal-reclaim');
+  openDrawer(accId);
+  renderAccounts();
+  renderOverview();
+}
+
+// 5. Reset Password / Resend Activation Link (CR-001)
+function openResetPasswordModal(accountId) {
+  const acc = AppState.accounts.find(a => a.id === accountId);
+  if (!acc) return;
+
+  document.getElementById('modal-reset-acc-id').innerText = acc.id;
+  document.getElementById('modal-reset-email').innerText = acc.ownerEmail || 'Email chưa cấu hình';
+  document.getElementById('modal-reset-pwd').classList.remove('hidden');
+}
+
+function submitResetPassword() {
+  const accId = document.getElementById('modal-reset-acc-id').innerText;
+  const acc = AppState.accounts.find(a => a.id === accountId || a.id === accId);
+
+  if (acc) {
+    const isPending = acc.status === 'PENDING';
+    const logAction = isPending ? 'Gửi lại kích hoạt' : 'Reset mật khẩu';
+    const logDetail = isPending 
+      ? `Gửi lại link kích hoạt tài khoản Zalo Cloud cho nhân viên ${acc.ownerName} (${acc.ownerEmail}) với hạn timeout 3 ngày`
+      : `Reset thông tin đăng nhập và gửi thông tin cấp lại tới ${acc.ownerEmail}`;
+
+    addAuditLog(logAction, acc.id, logDetail);
+    alert(isPending 
+      ? `Đã gửi lại link kích hoạt tài khoản cho ${acc.ownerName} qua email ${acc.ownerEmail}!`
+      : `Đã gửi thông tin cấp lại mật khẩu cho tài khoản ${accId} qua email doanh nghiệp.`
+    );
+  }
+
+  closeModal('modal-reset-pwd');
+  openDrawer(accId);
+}
+
+// 5b. Tùy chỉnh Tên hiển thị Profile (CR-001)
+function openEditProfileModal() {
+  const acc = AppState.activeDrawerAccount;
+  if (!acc || !acc.ownerName) return;
+
+  document.getElementById('modal-edit-acc-id').value = acc.id;
+  document.getElementById('modal-edit-owner-name').value = acc.ownerName;
+  document.getElementById('modal-edit-owner-email').value = acc.ownerEmail;
+  document.getElementById('modal-edit-display-name').value = acc.displayName || acc.ownerName;
+
+  document.getElementById('modal-edit-profile').classList.remove('hidden');
+}
+
+function submitEditProfile() {
+  const acc = AppState.activeDrawerAccount;
+  if (!acc) return;
+
+  const newDisplayName = document.getElementById('modal-edit-display-name').value.trim();
+  if (!newDisplayName) {
+    alert('Vui lòng nhập Tên hiển thị Zalo (Biệt danh CSKH).');
+    return;
+  }
+
+  const oldDisplayName = acc.displayName || acc.ownerName;
+  acc.displayName = newDisplayName;
+
+  addAuditLog('Tùy chỉnh Profile', acc.id, `Nhân viên ${acc.ownerName} cập nhật Tên hiển thị Zalo từ "${oldDisplayName}" thành "${newDisplayName}"`);
+
+  document.getElementById('dw-display-name').innerText = newDisplayName;
+
+  closeModal('modal-edit-profile');
+  alert(`Cập nhật Tên hiển thị cho tài khoản ${acc.id} thành công!`);
+  renderAccounts();
+  openDrawer(acc.id);
+}
+
+// 6. Quota Tree Overview (Clean visual display, all modifications via Modal Điều chỉnh Quota)
+function renderQuotas() {
+  const metrics = getMetrics();
+
+  // 1. Top 5 Quota KPIs
+  const elCentral = document.getElementById('quota-central-available');
+  if (elCentral) elCentral.innerText = metrics.centralPool;
+  const elAllocated = document.getElementById('quota-total-allocated');
+  if (elAllocated) elAllocated.innerText = metrics.allocated;
+  const elInUse = document.getElementById('quota-in-use-count');
+  if (elInUse) elInUse.innerText = metrics.assigned;
+  const elRate = document.getElementById('quota-in-use-rate');
+  if (elRate) {
+    const rateVal = metrics.allocated > 0 ? ((metrics.assigned / metrics.allocated) * 100).toFixed(1) : 0;
+    elRate.innerText = `Lấp đầy ${rateVal}% đã phân vùng`;
+  }
+  const elBranchUnassigned = document.getElementById('quota-branch-unassigned');
+  if (elBranchUnassigned) elBranchUnassigned.innerText = metrics.unassignedInBranch;
+
+  // 2. Render 100% Stacked Regional Distribution Bar (7 Vùng + Kho trung tâm)
+  const distBar = document.getElementById('regional-distribution-bar');
+  const distLegend = document.getElementById('regional-distribution-legend');
+
+  if (distBar && distLegend) {
+    distBar.innerHTML = '';
+    distLegend.innerHTML = '';
+
+    const REGION_COLORS = [
+      { bg: 'bg-blue-600', dot: 'bg-blue-600', text: 'text-blue-700' },
+      { bg: 'bg-teal-600', dot: 'bg-teal-600', text: 'text-teal-700' },
+      { bg: 'bg-cyan-600', dot: 'bg-cyan-600', text: 'text-cyan-700' },
+      { bg: 'bg-indigo-600', dot: 'bg-indigo-600', text: 'text-indigo-700' },
+      { bg: 'bg-emerald-600', dot: 'bg-emerald-600', text: 'text-emerald-700' },
+      { bg: 'bg-amber-600', dot: 'bg-amber-600', text: 'text-amber-700' },
+      { bg: 'bg-orange-600', dot: 'bg-orange-600', text: 'text-orange-700' }
+    ];
+
+    AppState.regions.forEach((reg, idx) => {
+      const regAccounts = AppState.accounts.filter(a => a.region === reg.name);
+      const regQuota = regAccounts.length;
+      const pct = (regQuota / 100) * 100;
+      const color = REGION_COLORS[idx % REGION_COLORS.length];
+
+      // Segment in bar — flex-shrink-0 prevents CSS from squishing segments
+      if (pct > 0) {
+        const seg = document.createElement('div');
+        seg.className = `h-full ${color.bg} transition-all duration-300 relative group flex items-center justify-center text-[10px] font-bold text-white overflow-hidden flex-shrink-0`;
+        seg.style.width = `${pct}%`;
+        seg.title = `${reg.name}: ${regQuota} Quota (${pct}%)`;
+        if (pct >= 8) {
+          seg.innerHTML = `<span class="truncate px-1">${reg.name.split(' - ')[0]} (${regQuota})</span>`;
+        }
+        distBar.appendChild(seg);
       }
 
-      return {
-        id: reg.id,
-        name: reg.name,
-        allocated: regAlloc,
-        used: regUsed,
-        free: Math.max(0, regAlloc - regUsed),
-        util: parseFloat(util),
-        statusClass,
-        badgeClass,
-        statusText,
-        branchesCount: reg.branches.length
-      };
+      // Legend chip — larger dots, more padding
+      const chip = document.createElement('div');
+      chip.className = 'inline-flex items-center gap-1.5 px-2 py-1 rounded bg-surface-container-low border border-outline-variant/40 text-[11px] font-medium';
+      chip.innerHTML = `
+        <span class="w-3 h-3 rounded-full ${color.dot} shrink-0"></span>
+        <span class="text-on-surface">${reg.name}:</span>
+        <strong class="${color.text} font-mono">${regQuota}</strong>
+        <span class="text-slate-400 text-[10px]">(${pct}%)</span>
+      `;
+      distLegend.appendChild(chip);
     });
 
-    let html = `
-      <div class="view-header">
-        <div class="view-title-group">
-          <div class="title-with-pill">
-            <h1 class="view-page-title">Phân Bổ Quota Theo Đơn Vị</h1>
-            <span class="scope-pill-badge">${isBranchAdmin ? 'Chi nhánh HCM-01' : 'Toàn doanh nghiệp'}</span>
-          </div>
-          <p class="view-page-desc">
-            Mô hình trực tiếp 1 cấp: Super Admin phân bổ và điều chuyển hạn mức Quota từ Quỹ công ty xuống từng Chi nhánh, theo dõi chỉ số sức khỏe 3 Miền.
-          </p>
-        </div>
-        <div class="view-header-actions">
-          ${!isBranchAdmin ? `
-            <button class="btn btn-outline btn-sm" id="btn-export-allocation">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span>Xuất ma trận Quota</span>
-            </button>
-            <button class="btn btn-primary btn-sm" id="btn-top-grant-quota">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              <span>Phân Bổ Quota Cho Đơn Vị</span>
-            </button>
-          ` : ''}
-        </div>
-      </div>
+    // Central Pool Segment — appended LAST so it is always rightmost
+    const centralCount = metrics.centralPool;
+    const centralPct = (centralCount / 100) * 100;
+    if (centralPct > 0) {
+      const centralSeg = document.createElement('div');
+      centralSeg.className = 'h-full bg-slate-400 transition-all duration-300 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden flex-shrink-0';
+      centralSeg.style.width = `${centralPct}%`;
+      centralSeg.title = `Kho trung tâm: ${centralCount} Quota (${centralPct}%)`;
+      if (centralPct >= 10) {
+        centralSeg.innerHTML = `<span class="truncate px-1">Kho trung tâm (${centralCount})</span>`;
+      }
+      distBar.appendChild(centralSeg);
 
-      <!-- Thẻ Quỹ Dự Phòng Super Admin & Tổng quan Hạn mức -->
-      <div class="allocation-summary-grid">
-        <div class="allocation-stat-card" style="border-top: 3px solid var(--primary);">
-          <div class="stat-title">Quỹ Dự Phòng Super Admin Giữ</div>
-          <div class="stat-val font-mono num-green">${formatNumber(companyReserve)} Quota</div>
-          <div class="stat-sub">Sẵn sàng cấp thêm ngay khi chi nhánh thiếu</div>
-        </div>
+      const centralChip = document.createElement('div');
+      centralChip.className = 'inline-flex items-center gap-1.5 px-2 py-1 rounded bg-slate-100 border border-slate-300 text-[11px] font-medium';
+      centralChip.innerHTML = `
+        <span class="w-3 h-3 rounded-full bg-slate-500 shrink-0"></span>
+        <span class="text-slate-800">Kho trung tâm:</span>
+        <strong class="text-slate-700 font-mono">${centralCount}</strong>
+        <span class="text-slate-500 text-[10px]">(${centralPct}%)</span>
+      `;
+      distLegend.appendChild(centralChip);
+    }
+  }
 
-        <div class="allocation-stat-card">
-          <div class="stat-title">Tổng Hợp Đồng Toàn Quốc</div>
-          <div class="stat-val font-mono">${formatNumber(state.orgTree.totalCompanyQuota)} Quota</div>
-          <div class="stat-sub">Hạn mức Zalo Enterprise toàn công ty</div>
-        </div>
+  // 3. Render 7 Regional Cards in Quota Tree Container
+  const quotaContainer = document.getElementById('quota-tree-container');
+  if (!quotaContainer) return;
+  quotaContainer.innerHTML = '';
 
-        <div class="allocation-stat-card">
-          <div class="stat-title">Đã Phân Bổ Chi Nhánh</div>
-          <div class="stat-val font-mono text-primary">${formatNumber(totalAllocatedToBranches)} Quota</div>
-          <div class="stat-sub">${allocationRate}% hạn mức đã giao chỉ tiêu</div>
-        </div>
+    AppState.regions.forEach(region => {
+    const regAccounts = AppState.accounts.filter(a => a.region === region.name);
+    const regQuota = regAccounts.length;
+    const regActive = regAccounts.filter(a => a.status === 'ACTIVE').length;
+    const regPendingLocked = regAccounts.filter(a => a.status === 'PENDING' || a.status === 'LOCKED').length;
+    const regUnassigned = regAccounts.filter(a => a.ownerName === null || a.status === 'UNASSIGNED').length;
+    const regUtil = regQuota > 0 ? Math.round((regActive / regQuota) * 100) : 0;
 
-        <div class="allocation-stat-card">
-          <div class="stat-title">Thực Tế Đang Sử Dụng</div>
-          <div class="stat-val font-mono">${formatNumber(totalInUse)} Quota</div>
-          <div class="stat-sub">${totalUsedActive} Active • ${totalUsedPending} Pending • ${totalUsedSuspended} Khóa</div>
-        </div>
-      </div>
+    // ── OBJECTIVE RISK BADGE (Dữ kiện khách quan theo chỉ đạo) ──
+    let riskBadge = '';
+    if (regUnassigned === 0) {
+      riskBadge = '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-red-50 text-red-700 border border-red-300"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>Đã hết quota</span>';
+    } else if (regUnassigned === 1) {
+      riskBadge = '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Sắp hết quota (còn 1)</span>';
+    } else {
+      riskBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Còn quota dự phòng (còn ${regUnassigned})</span>`;
+    }
 
-      <!-- Trạng Thái Sức Khỏe Quota 3 Vùng (Brainstorm Feature) -->
-      <div class="regional-health-grid">
-        ${regionHealthData.map(rh => `
-          <div class="regional-health-card ${rh.statusClass}">
-            <div class="regional-card-header">
-              <span class="regional-card-title">${escapeHtml(rh.name)} (${rh.branchesCount} chi nhánh)</span>
-              <span class="regional-health-badge ${rh.badgeClass}">${rh.statusText}</span>
+    const card = document.createElement('div');
+    card.className = 'bg-surface-container-lowest border border-outline-variant/60 rounded-xl overflow-hidden shadow-xs mb-3';
+
+    // Compute branch stats (Objective data, no fabricated recommendation tags)
+    const branchStats = region.branches.map(b => {
+      const bAccounts = AppState.accounts.filter(a => a.branch === b.name);
+      const bQuota = bAccounts.length;
+      const bActive = bAccounts.filter(a => a.status === 'ACTIVE').length;
+      const bPendingLocked = bAccounts.filter(a => a.status === 'PENDING' || a.status === 'LOCKED').length;
+      const bUnassigned = bAccounts.filter(a => a.ownerName === null || a.status === 'UNASSIGNED').length;
+      const bUtil = bQuota > 0 ? Math.round((bActive / bQuota) * 100) : 0;
+      return { name: b.name, bQuota, bActive, bPendingLocked, bUnassigned, bUtil };
+    });
+
+    let branchesRows = '';
+    branchStats.forEach(bs => {
+      branchesRows += `
+        <tr class="hover:bg-slate-50/80 border-b border-outline-variant/20 transition-colors group">
+          <td class="py-2 px-4 font-medium text-on-surface">
+            <div class="flex items-center gap-2">
+              <span class="material-symbols-outlined text-slate-400 text-[16px]">subdirectory_arrow_right</span>
+              <span>${bs.name}</span>
             </div>
-            <div class="flex-between text-xs text-muted">
-              <span>Được cấp: <strong>${formatNumber(rh.allocated)}</strong></span>
-              <span>Đang dùng: <strong>${formatNumber(rh.used)}</strong></span>
-              <span>Còn trống: <strong class="num-green">${formatNumber(rh.free)}</strong></span>
+          </td>
+          <td class="py-2 px-3 text-center font-bold text-primary font-mono">${bs.bQuota}</td>
+          <td class="py-2 px-3 text-center font-semibold text-emerald-700 font-mono">${bs.bActive}</td>
+          <td class="py-2 px-3 text-center font-medium text-amber-700 font-mono">${bs.bPendingLocked}</td>
+          <td class="py-2 px-3 text-center font-medium ${bs.bUnassigned > 0 ? 'text-sky-700 font-bold' : 'text-slate-400'} font-mono">${bs.bUnassigned}</td>
+          <td class="py-2 px-4">
+            <div class="flex items-center gap-2 max-w-[150px] mx-auto">
+              <div class="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden flex shadow-inner">
+                <div class="h-full bg-emerald-500 rounded-full" style="width: ${bs.bUtil}%;"></div>
+              </div>
+              <span class="text-[11px] font-bold text-slate-600 font-mono w-9 text-right">${bs.bUtil}%</span>
             </div>
-            <div class="allocation-progress-bar">
-              <div class="allocation-progress-fill ${rh.util >= 90 ? 'high' : (rh.util >= 80 ? 'warn' : '')}" style="width: ${Math.min(100, rh.util)}%;"></div>
-            </div>
-            <div class="text-xs text-secondary font-mono mt-4">Tỷ lệ khai thác Quota: <strong>${rh.util}%</strong></div>
-          </div>
-        `).join('')}
-      </div>
-    `;
-
-    // Flatten all branches across regions
-    const allBranches = [];
-    state.orgTree.regions.forEach(reg => {
-      reg.branches.forEach(b => {
-        allBranches.push({
-          ...b,
-          regionId: reg.id,
-          regionName: reg.name
-        });
-      });
-    });
-
-    // Filter branches based on state.allocationFilters
-    const filteredBranches = allBranches.filter(b => {
-      if (isBranchAdmin && b.id !== 'HCM-01') return false;
-
-      // Filter by Search (name or code or region)
-      if (state.allocationFilters.search) {
-        const q = state.allocationFilters.search.toLowerCase();
-        const matchName = b.name.toLowerCase().includes(q);
-        const matchId = b.id.toLowerCase().includes(q);
-        const matchReg = b.regionName.toLowerCase().includes(q);
-        if (!matchName && !matchId && !matchReg) return false;
-      }
-
-      // Filter by Region
-      if (state.allocationFilters.region !== 'ALL') {
-        if (b.regionId !== state.allocationFilters.region) return false;
-      }
-
-      // Filter by Utilization Status
-      if (state.allocationFilters.utilizationStatus !== 'ALL') {
-        const bStats = getBranchQuotaStats(b.id);
-        const util = bStats.utilization;
-        if (state.allocationFilters.utilizationStatus === 'DANGER') {
-          if (util < 90) return false;
-        } else if (state.allocationFilters.utilizationStatus === 'WARN') {
-          if (util < 80 || util >= 90) return false;
-        } else if (state.allocationFilters.utilizationStatus === 'GOOD') {
-          if (util >= 80) return false;
-        } else if (state.allocationFilters.utilizationStatus === 'HIGH_FREE') {
-          if (bStats.available < 10) return false;
-        }
-      }
-
-      return true;
-    });
-
-    // Aggregate metrics for footer total row
-    let sumAllocated = 0;
-    let sumUsed = 0;
-    let sumActive = 0;
-    let sumPending = 0;
-    let sumSuspended = 0;
-    let sumFree = 0;
-
-    filteredBranches.forEach(b => {
-      const bStats = getBranchQuotaStats(b.id);
-      sumAllocated += bStats.totalQuota;
-      sumUsed += bStats.inUse;
-      sumActive += bStats.active;
-      sumPending += bStats.pending;
-      sumSuspended += bStats.suspended;
-      sumFree += bStats.available;
-    });
-
-    const avgUtil = sumAllocated > 0 ? ((sumUsed / sumAllocated) * 100).toFixed(1) : 0;
-
-    html += `
-      <!-- Thanh lọc nâng cao Quota Allocation -->
-      <div class="allocation-filter-bar">
-        <div class="allocation-filter-group">
-          <div class="search-input-wrap" style="flex: 1; min-width: 250px;">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            <input type="text" id="alloc-search-input" class="search-input" placeholder="Tìm theo tên chi nhánh, mã đơn vị (VD: HCM, DAD, HAN...)" value="${escapeHtml(state.allocationFilters.search || '')}">
-          </div>
-
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span class="text-xs text-muted font-medium">Vùng:</span>
-            <select class="form-select-box" id="alloc-filter-region" style="width: 160px; height: 34px; padding: 4px 8px;">
-              <option value="ALL" ${state.allocationFilters.region === 'ALL' ? 'selected' : ''}>Tất cả các miền</option>
-              <option value="South" ${state.allocationFilters.region === 'South' ? 'selected' : ''}>Miền Nam</option>
-              <option value="Central" ${state.allocationFilters.region === 'Central' ? 'selected' : ''}>Miền Trung</option>
-              <option value="North" ${state.allocationFilters.region === 'North' ? 'selected' : ''}>Miền Bắc</option>
-            </select>
-          </div>
-
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span class="text-xs text-muted font-medium">Tình trạng tải:</span>
-            <select class="form-select-box" id="alloc-filter-status" style="width: 210px; height: 34px; padding: 4px 8px;">
-              <option value="ALL" ${state.allocationFilters.utilizationStatus === 'ALL' ? 'selected' : ''}>Tất cả tình trạng tải</option>
-              <option value="DANGER" ${state.allocationFilters.utilizationStatus === 'DANGER' ? 'selected' : ''}>🔴 Chạm trần (≥ 90%)</option>
-              <option value="WARN" ${state.allocationFilters.utilizationStatus === 'WARN' ? 'selected' : ''}>🟡 Cảnh báo (80 - 89%)</option>
-              <option value="GOOD" ${state.allocationFilters.utilizationStatus === 'GOOD' ? 'selected' : ''}>🟢 Ổn định (&lt; 80%)</option>
-              <option value="HIGH_FREE" ${state.allocationFilters.utilizationStatus === 'HIGH_FREE' ? 'selected' : ''}>📦 Có Quota trống (≥ 10)</option>
-            </select>
-          </div>
-
-          ${(state.allocationFilters.search || state.allocationFilters.region !== 'ALL' || state.allocationFilters.utilizationStatus !== 'ALL') ? `
-            <button class="btn btn-outline btn-xs" id="alloc-btn-reset-filter" title="Đặt lại bộ lọc" style="height: 34px; display: inline-flex; align-items: center; gap: 4px;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-              <span>Đặt lại</span>
+          </td>
+          <td class="py-2 px-3 text-right">
+            <button onclick="jumpToBranchAccounts('${region.name}', '${bs.name}')" class="text-slate-400 hover:text-primary hover:bg-primary/10 w-7 h-7 rounded inline-flex items-center justify-center transition-colors tooltip-trigger" title="Xem danh sách tài khoản">
+              <span class="material-symbols-outlined text-[16px]">person_search</span>
             </button>
-          ` : ''}
-        </div>
-
-        <div class="text-xs text-muted font-mono" style="white-space: nowrap;">
-          Hiển thị <strong>${filteredBranches.length}</strong> / <strong>${allBranches.length}</strong> đơn vị
-        </div>
-      </div>
-
-      <!-- Bảng Duy Nhất Toàn Bộ Chi Nhánh (Unified Allocation Table) -->
-      <div class="card p-0 mb-20" style="overflow: hidden; border: 1px solid var(--border-light); border-radius: var(--radius-md);">
-        <div class="table-responsive">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th style="width: 230px;">CHI NHÁNH / ĐƠN VỊ</th>
-                <th style="width: 110px;">MÃ ĐƠN VỊ</th>
-                <th style="width: 120px;">VÙNG</th>
-                <th style="width: 140px; text-align: right;">QUOTA ĐƯỢC CẤP</th>
-                <th style="width: 160px; text-align: right;">ĐANG SỬ DỤNG</th>
-                <th style="width: 120px; text-align: right;">CÒN TRỐNG</th>
-                <th style="width: 190px;">TỶ LỆ KHAI THÁC</th>
-                <th style="width: 180px; text-align: right;">THAO TÁC</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredBranches.length === 0 ? `
-                <tr>
-                  <td colspan="8" class="table-empty-cell" style="padding: 36px; text-align: center; color: var(--text-muted);">
-                    Không tìm thấy đơn vị chi nhánh nào khớp với bộ lọc nâng cao hiện tại.
-                  </td>
-                </tr>
-              ` : filteredBranches.map(b => {
-                const bStats = getBranchQuotaStats(b.id);
-                const branchActive = bStats.active;
-                const branchPending = bStats.pending;
-                const branchSuspended = bStats.suspended;
-                const branchUsed = bStats.inUse;
-                const branchFree = bStats.available;
-                const branchPercent = bStats.utilization;
-
-                let regionTagClass = 'south';
-                if (b.regionId === 'Central') regionTagClass = 'central';
-                else if (b.regionId === 'North') regionTagClass = 'north';
-
-                return `
-                  <tr>
-                    <td>
-                      <span class="font-semibold text-main">${escapeHtml(b.name)}</span>
-                    </td>
-                    <td>
-                      <span class="branch-code-badge font-mono">${b.id}</span>
-                    </td>
-                    <td>
-                      <span class="region-tag ${regionTagClass}">${escapeHtml(b.regionName)}</span>
-                    </td>
-                    <td style="text-align: right;">
-                      <span class="font-mono font-semibold text-primary">${formatNumber(b.totalQuota || 0)}</span>
-                    </td>
-                    <td style="text-align: right;">
-                      <span class="font-mono font-semibold">${formatNumber(branchUsed)}</span>
-                      <div class="text-xs text-muted">(${branchActive} Active • ${branchPending} Pending • ${branchSuspended} Khóa)</div>
-                    </td>
-                    <td style="text-align: right;">
-                      <span class="font-mono ${branchFree > 0 ? 'num-green font-semibold' : 'num-red font-semibold'}">
-                        ${formatNumber(branchFree)}
-                      </span>
-                    </td>
-                    <td>
-                      <div class="flex-between text-xs mb-4">
-                        <span class="text-secondary font-mono">${branchPercent}%</span>
-                        <span class="text-muted">${branchUsed}/${b.totalQuota}</span>
-                      </div>
-                      <div class="allocation-progress-bar">
-                        <div class="allocation-progress-fill ${branchPercent >= 90 ? 'high' : (branchPercent >= 80 ? 'warn' : '')}" style="width: ${Math.min(100, branchPercent)}%;"></div>
-                      </div>
-                    </td>
-                    <td style="text-align: right;">
-                      ${!isBranchAdmin ? `
-                        <div style="display: inline-flex; align-items: center; gap: 6px;">
-                          ${branchFree > 0 ? `
-                            <button class="btn btn-outline btn-xs btn-warn" data-action="open-recall-modal" data-branch="${b.id}" title="Cấu hình thu hồi Quota nhàn rỗi về Quỹ dự phòng">
-                              Thu hồi
-                            </button>
-                          ` : `
-                            <button class="btn btn-outline btn-xs btn-disabled" disabled title="Chi nhánh không còn Quota trống để thu hồi">
-                              Thu hồi
-                            </button>
-                          `}
-                          <button class="btn btn-primary btn-xs" data-action="open-grant-modal" data-branch="${b.id}" title="Cấu hình phân bổ thêm Quota từ Quỹ dự phòng">
-                            Phân bổ
-                          </button>
-                        </div>
-                      ` : `
-                        <span class="text-xs text-muted">Chỉ xem</span>
-                      `}
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-            ${filteredBranches.length > 0 ? `
-              <tfoot>
-                <tr class="table-row-total">
-                  <td colspan="3">
-                    <span class="font-semibold text-main">TỔNG CỘNG (${filteredBranches.length} ĐƠN VỊ HIỂN THỊ)</span>
-                  </td>
-                  <td style="text-align: right;">
-                    <span class="font-mono font-bold text-primary">${formatNumber(sumAllocated)}</span>
-                  </td>
-                  <td style="text-align: right;">
-                    <span class="font-mono font-bold">${formatNumber(sumUsed)}</span>
-                    <div class="text-xs text-muted">(${sumActive} Active • ${sumPending} Pending • ${sumSuspended} Khóa)</div>
-                  </td>
-                  <td style="text-align: right;">
-                    <span class="font-mono font-bold ${sumFree > 0 ? 'num-green' : 'num-red'}">${formatNumber(sumFree)}</span>
-                  </td>
-                  <td>
-                    <div class="flex-between text-xs mb-4">
-                      <span class="font-mono font-semibold">${avgUtil}%</span>
-                      <span class="text-muted">${sumUsed}/${sumAllocated}</span>
-                    </div>
-                    <div class="allocation-progress-bar">
-                      <div class="allocation-progress-fill" style="width: ${Math.min(100, avgUtil)}%;"></div>
-                    </div>
-                  </td>
-                  <td style="text-align: right; color: var(--text-muted); font-size: 11px;">
-                    —
-                  </td>
-                </tr>
-              </tfoot>
-            ` : ''}
-          </table>
-        </div>
-      </div>
-    `;
-
-    container.innerHTML = html;
-
-    // Attach filter listeners
-    const searchInput = container.querySelector('#alloc-search-input');
-    if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
-        const cursor = e.target.selectionStart;
-        state.allocationFilters.search = e.target.value;
-        saveState();
-        renderQuotaAllocationView(container);
-        const newSearch = container.querySelector('#alloc-search-input');
-        if (newSearch) {
-          newSearch.focus();
-          newSearch.setSelectionRange(cursor, cursor);
-        }
-      });
-    }
-
-    const regionSelect = container.querySelector('#alloc-filter-region');
-    if (regionSelect) {
-      regionSelect.addEventListener('change', (e) => {
-        state.allocationFilters.region = e.target.value;
-        saveState();
-        renderQuotaAllocationView(container);
-      });
-    }
-
-    const statusSelect = container.querySelector('#alloc-filter-status');
-    if (statusSelect) {
-      statusSelect.addEventListener('change', (e) => {
-        state.allocationFilters.utilizationStatus = e.target.value;
-        saveState();
-        renderQuotaAllocationView(container);
-      });
-    }
-
-    const resetBtn = container.querySelector('#alloc-btn-reset-filter');
-    if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
-        state.allocationFilters.search = '';
-        state.allocationFilters.region = 'ALL';
-        state.allocationFilters.utilizationStatus = 'ALL';
-        saveState();
-        renderQuotaAllocationView(container);
-      });
-    }
-
-    // Attach listeners for Quota Allocation view
-    container.querySelectorAll('[data-action="open-grant-modal"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const branchId = btn.getAttribute('data-branch');
-        openGrantQuotaModal(branchId);
-      });
+          </td>
+        </tr>
+      `;
     });
 
-    container.querySelectorAll('[data-action="open-recall-modal"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const branchId = btn.getAttribute('data-branch');
-        openRecallQuotaModal(branchId);
-      });
-    });
+    // Percentages for Split Bar
+    const activePct = regQuota > 0 ? (regActive / regQuota) * 100 : 0;
+    const pendingLockedPct = regQuota > 0 ? (regPendingLocked / regQuota) * 100 : 0;
+    const unassignedPct = regQuota > 0 ? (regUnassigned / regQuota) * 100 : 0;
 
-    const exportBtn = document.getElementById('btn-export-allocation');
-    if (exportBtn) {
-      exportBtn.addEventListener('click', exportQuotaCSV);
-    }
+    card.innerHTML = `
+      <!-- Compact Enterprise Region Row -->
+      <div class="py-2.5 px-4 bg-surface-container-low flex items-center justify-between gap-4 hover:bg-surface-container transition-colors select-none">
 
-    const grantBtn = document.getElementById('btn-top-grant-quota');
-    if (grantBtn) {
-      grantBtn.addEventListener('click', openGrantQuotaModal);
-    }
-  }
-
-
-  // Modal Phân Bổ Thêm Quota Cho Đơn Vị (Dành cho Super Admin)
-  function openGrantQuotaModal(preselectedBranchId) {
-    let totalAlloc = 0;
-    state.orgTree.regions.forEach(r => r.branches.forEach(b => totalAlloc += (b.totalQuota || 0)));
-    const reserve = Math.max(0, state.orgTree.totalCompanyQuota - totalAlloc);
-
-    if (reserve <= 0) {
-      showToast('Quỹ Quota dự phòng công ty đã hết (0 Quota), không thể phân bổ thêm', 'warning');
-      return;
-    }
-
-    const branchOptions = [];
-    state.orgTree.regions.forEach(r => {
-      r.branches.forEach(b => {
-        const isSel = (preselectedBranchId && b.id === preselectedBranchId) ? 'selected' : '';
-        branchOptions.push(`<option value="${b.id}" ${isSel}>${escapeHtml(b.name)} (${b.id}) — Đang có ${b.totalQuota} Quota</option>`);
-      });
-    });
-
-    const preset10 = reserve >= 10 ? `<button type="button" class="btn btn-outline btn-xs" data-preset="10">+10 Quota</button>` : '';
-    const preset20 = reserve >= 20 ? `<button type="button" class="btn btn-outline btn-xs" data-preset="20">+20 Quota</button>` : '';
-    const preset50 = reserve >= 50 ? `<button type="button" class="btn btn-outline btn-xs" data-preset="50">+50 Quota</button>` : '';
-
-    const bodyHtml = `
-      <form id="form-grant-quota">
-        <div class="modal-notice-banner mb-14" style="background-color: #f0fdf4; border-color: #bbf7d0;">
-          <div class="notice-title num-green" style="font-weight: 700;">Quỹ Dự Phòng Khả Dụng: ${formatNumber(reserve)} Quota</div>
-          <div class="notice-desc">
-            Super Admin trích trực tiếp từ Quỹ dự phòng công ty để phân bổ thêm cho Chi nhánh. Không được phân bổ vượt quá Quỹ dự phòng hiện có.
+        <!-- Col 1: Fixed 310px width (Region Name, Risk Badge, Branch Count) -->
+        <div class="w-[310px] shrink-0 cursor-pointer flex items-center gap-2.5" onclick="toggleRegionBranches('${region.id}')">
+          <span class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <span class="material-symbols-outlined text-[20px]">location_city</span>
+          </span>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <strong class="text-on-surface text-sm font-bold truncate">${region.name}</strong>
+              ${riskBadge}
+            </div>
+            <div class="text-[11px] text-slate-500 font-mono mt-0.5">
+              ${region.branches.length} chi nhánh trực thuộc
+            </div>
           </div>
         </div>
 
-        <div class="form-group mb-14">
-          <label class="form-label">Chọn Đơn Vị / Chi Nhánh Nhận Quota:</label>
-          <select class="filter-select" id="grant-branch-select" style="width: 100%;">
-            ${branchOptions.join('')}
-          </select>
-        </div>
-
-        <div class="form-group mb-14">
-          <label class="form-label">Chọn nhanh số lượng phân bổ:</label>
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            ${preset10}
-            ${preset20}
-            ${preset50}
+        <!-- Col 2: Fixed Semantic Split Bar (Đang dùng: Emerald, Chờ/Khóa: Amber, Khả dụng: Sky) -->
+        <div class="flex-1 max-w-md px-3 hidden md:flex flex-col gap-1 cursor-pointer justify-center" onclick="toggleRegionBranches('${region.id}')">
+          <!-- 3-Segment Semantic Split Bar -->
+          <div class="w-full h-2.5 rounded-full bg-slate-200 overflow-hidden flex shadow-inner">
+            <div class="h-full bg-emerald-500 transition-all duration-300" style="width: ${activePct}%;" title="Đang dùng: ${regActive}"></div>
+            <div class="h-full bg-amber-400 transition-all duration-300" style="width: ${pendingLockedPct}%;" title="Chờ KH / Tạm khóa: ${regPendingLocked}"></div>
+            <div class="h-full bg-sky-400 transition-all duration-300" style="width: ${unassignedPct}%;" title="Khả dụng chi nhánh: ${regUnassigned}"></div>
           </div>
-          <label class="form-label">Số Lượng Quota Cần Phân Bổ Thêm:</label>
-          <input type="number" class="input-text-main" id="grant-amount-input" 
-                 min="1" max="${reserve}" value="${Math.min(10, reserve)}" required>
-          <div class="form-hint">
-            Tối đa có thể cấp thêm: <strong>${reserve} Quota</strong> (theo Quỹ dự phòng Super Admin hiện có).
-          </div>
-        </div>
-
-        <div class="form-group mb-14">
-          <label class="form-label">Ghi Chú Lý Do Phân Bổ:</label>
-          <textarea class="input-text-main" id="grant-reason" rows="2" 
-                    placeholder="Ví dụ: Bổ sung chỉ tiêu mở rộng kinh doanh Quý 4/2026..."></textarea>
-        </div>
-      </form>
-    `;
-
-    const footerHtml = `
-      <button class="btn btn-outline" id="modal-cancel-btn">Hủy bỏ</button>
-      <button class="btn btn-primary" id="grant-submit-btn">Xác nhận phân bổ</button>
-    `;
-
-    openModal('Phân Bổ Thêm Quota Cho Đơn Vị', bodyHtml, footerHtml);
-
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-
-    document.querySelectorAll('[data-preset]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const val = parseInt(btn.getAttribute('data-preset'), 10);
-        const input = document.getElementById('grant-amount-input');
-        if (input && val <= reserve) input.value = val;
-      });
-    });
-
-    document.getElementById('grant-submit-btn').addEventListener('click', () => {
-      const branchId = document.getElementById('grant-branch-select').value;
-      const amount = parseInt(document.getElementById('grant-amount-input').value, 10);
-      const reason = document.getElementById('grant-reason').value.trim() || 'Phân bổ thêm Quota';
-
-      if (isNaN(amount) || amount <= 0 || amount > reserve) {
-        showToast(`Số lượng Quota phân bổ (${amount}) không hợp lệ hoặc vượt quá Quỹ dự phòng hiện có (${reserve} Quota)`, 'error');
-        return;
-      }
-
-      quickAddQuota(branchId, amount, reason);
-      closeModal();
-    });
-  }
-
-  // Modal Thu Hồi Quota Nhàn Rỗi Về Quỹ Dự Phòng (Dành cho Super Admin)
-  function openRecallQuotaModal(branchId) {
-    let targetBranch = null;
-    let targetRegion = null;
-    for (const r of state.orgTree.regions) {
-      for (const b of r.branches) {
-        if (b.id === branchId) {
-          targetBranch = b;
-          targetRegion = r;
-          break;
-        }
-      }
-      if (targetBranch) break;
-    }
-    if (!targetBranch) return;
-
-    const stats = getBranchQuotaStats(branchId);
-    const maxRecall = stats.available;
-
-    if (maxRecall <= 0) {
-      showToast(`Chi nhánh ${targetBranch.name} hiện không còn Quota trống để thu hồi`, 'warning');
-      return;
-    }
-
-    const preset10 = maxRecall >= 10 ? `<button type="button" class="btn btn-outline btn-xs" data-recall-preset="10">10 Quota</button>` : '';
-    const preset20 = maxRecall >= 20 ? `<button type="button" class="btn btn-outline btn-xs" data-recall-preset="20">20 Quota</button>` : '';
-    const presetAll = `<button type="button" class="btn btn-outline btn-xs btn-warn" data-recall-preset="${maxRecall}">Tất cả (${maxRecall} Quota)</button>`;
-
-    const bodyHtml = `
-      <form id="form-recall-quota">
-        <div class="modal-notice-banner mb-14" style="background-color: #fff7ed; border-color: #fed7aa;">
-          <div class="notice-title num-orange" style="font-weight: 700;">Thu Hồi Quota Nhàn Rỗi Về Quỹ Dự Phòng</div>
-          <div class="notice-desc" style="color: var(--text-main);">
-            Đơn vị: <strong>${escapeHtml(targetBranch.name)} (${targetBranch.id})</strong> • Vùng: <strong>${escapeHtml(targetRegion.name)}</strong><br/>
-            Hạn mức hiện tại: <strong>${targetBranch.totalQuota} Quota</strong> • Đang sử dụng thực tế: <strong>${stats.inUse} Quota</strong>.<br/>
-            Số Quota nhàn rỗi tối đa có thể thu hồi: <strong class="num-green">${maxRecall} Quota</strong>.
+          <!-- Clean Metric Legend Under Bar -->
+          <div class="flex items-center justify-between text-[11px] font-mono">
+            <div class="flex items-center gap-2 text-slate-600">
+              <span class="text-emerald-700 font-semibold">${regActive} Đang dùng</span>
+              <span class="text-slate-300">|</span>
+              <span class="text-amber-700 font-semibold">${regPendingLocked} Chờ/Khóa</span>
+              <span class="text-slate-300">|</span>
+              <span class="text-sky-700 font-semibold">${regUnassigned} Khả dụng</span>
+            </div>
+            <span class="text-slate-600 font-semibold text-[10px]"><strong>${regUtil}%</strong> đã khai thác</span>
           </div>
         </div>
 
-        <div class="form-group mb-14">
-          <label class="form-label">Chọn nhanh số lượng thu hồi:</label>
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            ${preset10}
-            ${preset20}
-            ${presetAll}
+        <!-- Col 3: Fixed 270px width (Total Quota, Adjust & Branch Actions) -->
+        <div class="w-[270px] shrink-0 flex items-center justify-end gap-2.5">
+          <div class="text-right font-mono mr-1">
+            <div class="text-xs font-bold text-primary">${regQuota} Quota</div>
           </div>
-          <label class="form-label">Số Lượng Quota Cần Thu Hồi:</label>
-          <input type="number" class="input-text-main" id="recall-amount-input" 
-                 min="1" max="${maxRecall}" value="${Math.min(10, maxRecall)}" required>
-          <div class="form-hint">
-            Tối thiểu 1 Quota. Tối đa <strong>${maxRecall} Quota</strong> (đảm bảo giữ nguyên ${stats.inUse} tài khoản đang sử dụng).
-          </div>
-        </div>
-
-        <div class="form-group mb-14">
-          <label class="form-label">Lý do thu hồi về Quỹ dự phòng:</label>
-          <textarea class="input-text-main" id="recall-reason" rows="2" 
-                    placeholder="Ví dụ: Tối ưu hóa Quota nhàn rỗi về Quỹ dự phòng công ty..."></textarea>
-        </div>
-      </form>
-    `;
-
-    const footerHtml = `
-      <button class="btn btn-outline" id="modal-cancel-btn">Hủy bỏ</button>
-      <button class="btn btn-danger" id="recall-submit-btn">Xác nhận thu hồi</button>
-    `;
-
-    openModal(`Thu Hồi Quota — ${targetBranch.name}`, bodyHtml, footerHtml);
-
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-
-    document.querySelectorAll('[data-recall-preset]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const val = parseInt(btn.getAttribute('data-recall-preset'), 10);
-        const input = document.getElementById('recall-amount-input');
-        if (input && val <= maxRecall) input.value = val;
-      });
-    });
-
-    document.getElementById('recall-submit-btn').addEventListener('click', () => {
-      const amount = parseInt(document.getElementById('recall-amount-input').value, 10);
-      const reason = document.getElementById('recall-reason').value.trim() || 'Thu hồi Quota nhàn rỗi';
-
-      if (isNaN(amount) || amount <= 0 || amount > maxRecall) {
-        showToast(`Số lượng Quota thu hồi không hợp lệ (phải từ 1 đến ${maxRecall})`, 'error');
-        return;
-      }
-
-      quickRecallQuota(branchId, amount, reason);
-      closeModal();
-    });
-  }
-
-  // Quick Add Quota (+10) from Central Reserve Pool
-  function quickAddQuota(branchId, amount) {
-    let branch = null;
-    state.orgTree.regions.forEach(r => {
-      r.branches.forEach(b => {
-        if (b.id === branchId) branch = b;
-      });
-    });
-    if (!branch) return;
-
-    let totalAlloc = 0;
-    state.orgTree.regions.forEach(r => r.branches.forEach(b => totalAlloc += (b.totalQuota || 0)));
-    const reserve = Math.max(0, state.orgTree.totalCompanyQuota - totalAlloc);
-
-    if (reserve < amount) {
-      showToast(`Quỹ dự phòng công ty không đủ (còn ${reserve} Quota)`, 'error');
-      return;
-    }
-
-    branch.totalQuota += amount;
-    state.auditLogs.unshift({
-      id: `LOG-${Date.now().toString().slice(-4)}`,
-      timestamp: '25/09/2026 14:30',
-      actor: getActorName(),
-      action: 'Cấp nhanh Quota chi nhánh',
-      target: `${branch.name} (${branch.id})`,
-      branch: `${branch.name} (${branch.id})`,
-      impact: `Cấp thêm +${amount} Quota từ Quỹ dự phòng công ty. Hạn mức mới: ${branch.totalQuota}`
-    });
-    saveState();
-    showToast(`Đã cấp thêm +${amount} Quota cho ${branch.name}`, 'success');
-    renderApp();
-  }
-
-  // Quick Recall Quota back to Central Reserve Pool
-  function quickRecallQuota(branchId, amount, reason) {
-    let branch = null;
-    state.orgTree.regions.forEach(r => {
-      r.branches.forEach(b => {
-        if (b.id === branchId) branch = b;
-      });
-    });
-    if (!branch) return;
-
-    const stats = getBranchQuotaStats(branchId);
-    if (stats.available < amount) {
-      showToast(`Không thể thu hồi vì chi nhánh chỉ còn ${stats.available} Quota trống (cần tối thiểu ${amount} trống)`, 'error');
-      return;
-    }
-
-    if (branch.totalQuota - amount < stats.inUse) {
-      showToast(`Không thể thu hồi vì số Quota sau thu hồi (${branch.totalQuota - amount}) sẽ thấp hơn số đang dùng (${stats.inUse})`, 'error');
-      return;
-    }
-
-    branch.totalQuota -= amount;
-    
-    // Tính lại Quỹ dự phòng công ty sau khi thu hồi
-    let totalAlloc = 0;
-    state.orgTree.regions.forEach(r => r.branches.forEach(b => totalAlloc += (b.totalQuota || 0)));
-    const newReserve = Math.max(0, state.orgTree.totalCompanyQuota - totalAlloc);
-
-    state.auditLogs.unshift({
-      id: `LOG-${Date.now().toString().slice(-4)}`,
-      timestamp: '25/09/2026 14:31',
-      actor: getActorName(),
-      action: 'Thu hồi Quota nhàn rỗi',
-      target: `${branch.name} (${branch.id})`,
-      branch: `${branch.name} (${branch.id})`,
-      impact: `Thu hồi ${amount} Quota nhàn rỗi về Quỹ dự phòng công ty. Hạn mức mới chi nhánh: ${branch.totalQuota} Quota. Quỹ dự phòng tăng lên: ${newReserve} Quota.`
-    });
-    saveState();
-    showToast(`Đã thu hồi ${amount} Quota từ ${branch.name} về Quỹ dự phòng công ty`, 'success');
-    renderApp();
-  }
-
-  function openAdjustQuotaModal(regionId, branchId) {
-    let targetBranch = null;
-    let targetRegion = null;
-
-    for (const r of state.orgTree.regions) {
-      for (const b of r.branches) {
-        if (b.id === branchId) {
-          targetBranch = b;
-          targetRegion = r;
-          break;
-        }
-      }
-      if (targetBranch) break;
-    }
-
-    if (!targetBranch) return;
-
-    // Tính số quota hiện đang sử dụng thực tế chuẩn xác qua Engine
-    const stats = getBranchQuotaStats(branchId);
-    const currentUsed = stats.inUse;
-
-    // Tính quota công ty dự phòng hiện tại
-    let totalAllocated = 0;
-    state.orgTree.regions.forEach(r => {
-      r.branches.forEach(b => {
-        totalAllocated += (b.totalQuota || 0);
-      });
-    });
-    const currentReserve = Math.max(0, state.orgTree.totalCompanyQuota - totalAllocated);
-
-    const bodyHtml = `
-      <form id="form-adjust-quota">
-        <div class="modal-notice-banner mb-14" style="background-color: #f8fafc; border-color: #cbd5e1;">
-          <div class="notice-title" style="font-weight: 700; color: var(--text-main);">Đơn vị: ${escapeHtml(targetBranch.name)} (${targetBranch.id})</div>
-          <div class="notice-desc">
-            Thuộc <strong>${escapeHtml(targetRegion.name)}</strong> • Đang sử dụng: <strong>${currentUsed} Quota</strong> (${stats.active} Active, ${stats.pending} Pending, ${stats.suspended} Khóa).<br/>
-            Quỹ dự phòng toàn công ty sẵn sàng cấp thêm: <strong class="num-green">${currentReserve} Quota</strong>.
-          </div>
-        </div>
-
-        <div class="form-group mb-14">
-          <label class="form-label">Hạn mức Quota hiện tại:</label>
-          <input type="text" class="input-text-main" value="${targetBranch.totalQuota} Quota (Còn trống: ${stats.available} Quota)" disabled>
-        </div>
-
-        <div class="form-group mb-14">
-          <label class="form-label">Hạn mức Quota mới đề xuất:</label>
-          <input type="number" class="input-text-main" id="adjust-new-quota" 
-                 min="${currentUsed}" max="${targetBranch.totalQuota + currentReserve}" 
-                 value="${targetBranch.totalQuota}" required>
-          <div class="form-hint">
-            Tối thiểu ${currentUsed} Quota (không được thấp hơn số tài khoản đang dùng). Tối đa ${targetBranch.totalQuota + currentReserve} Quota (dựa theo Quỹ dự phòng công ty).
-          </div>
-        </div>
-
-        <div class="form-group mb-14">
-          <label class="form-label">Lý do điều chỉnh hạn mức:</label>
-          <textarea class="input-text-main" id="adjust-quota-reason" rows="2" 
-                    placeholder="Ví dụ: Bổ sung chỉ tiêu kinh doanh Quý 4/2026 hoặc thu hồi Quota nhàn rỗi..."></textarea>
-        </div>
-      </form>
-    `;
-
-    const footerHtml = `
-      <button class="btn btn-outline" id="modal-cancel-btn">Hủy bỏ</button>
-      <button class="btn btn-primary" id="adjust-submit-btn">Xác nhận điều chỉnh</button>
-    `;
-
-    openModal(`Điều Chỉnh Quota — ${targetBranch.name}`, bodyHtml, footerHtml);
-
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-
-    document.getElementById('adjust-submit-btn').addEventListener('click', () => {
-      const newQuotaVal = parseInt(document.getElementById('adjust-new-quota').value, 10);
-      const reason = document.getElementById('adjust-quota-reason').value.trim() || 'Điều chỉnh hạn mức định kỳ';
-
-      if (isNaN(newQuotaVal) || newQuotaVal < currentUsed) {
-        showToast(`Hạn mức mới không được nhỏ hơn số Quota đang dùng (${currentUsed})`, 'error');
-        return;
-      }
-
-      const diff = newQuotaVal - targetBranch.totalQuota;
-      if (diff > currentReserve) {
-        showToast(`Số Quota tăng (${diff}) vượt quá Quỹ dự phòng toàn công ty (${currentReserve})`, 'error');
-        return;
-      }
-
-      const oldQuota = targetBranch.totalQuota;
-      targetBranch.totalQuota = newQuotaVal;
-
-      const actionType = diff > 0 ? 'Phân bổ thêm Quota' : (diff < 0 ? 'Thu hồi Quota nhàn rỗi' : 'Điều chỉnh hạn mức Quota');
-      const actionDesc = diff > 0 ? `Cấp thêm +${diff} Quota từ Quỹ dự phòng.` : (diff < 0 ? `Thu hồi ${Math.abs(diff)} Quota về Quỹ dự phòng.` : 'Giữ nguyên hạn mức.');
-
-      state.auditLogs.unshift({
-        id: `LOG-${Date.now().toString().slice(-4)}`,
-        timestamp: '25/09/2026 14:10',
-        actor: getActorName(),
-        action: actionType,
-        target: `${targetBranch.name} (${targetBranch.id})`,
-        branch: `${targetBranch.name} (${targetBranch.id})`,
-        impact: `${actionDesc} Hạn mức mới: ${newQuotaVal} Quota (cũ: ${oldQuota}). Lý do: ${reason}`
-      });
-
-      saveState();
-      closeModal();
-      showToast(`Đã cập nhật hạn mức Quota cho ${targetBranch.name}: ${newQuotaVal} Quota`, 'success');
-      renderApp();
-    });
-  }
-
-  function renderAuditLogView(container) {
-    const isBranchAdmin = state.currentPersona === 'branch_admin';
-
-    const filteredLogs = state.auditLogs.filter(log => {
-      if (isBranchAdmin && !log.branch.includes('HCM-01')) return false;
-      if (state.auditFilters.search) {
-        const q = state.auditFilters.search.toLowerCase();
-        const matchAct = log.actor.toLowerCase().includes(q);
-        const matchAction = log.action.toLowerCase().includes(q);
-        const matchTarget = log.target.toLowerCase().includes(q);
-        const matchBranch = log.branch.toLowerCase().includes(q);
-        if (!matchAct && !matchAction && !matchTarget && !matchBranch) return false;
-      }
-      return true;
-    });
-
-    let html = `
-      <div class="view-header">
-        <div class="view-title-group">
-          <div class="title-with-pill">
-            <h1 class="view-page-title">Nhật ký Audit</h1>
-            <span class="scope-pill-badge">${isBranchAdmin ? 'Chi nhánh HCM-01' : 'Toàn hệ thống'}</span>
-          </div>
-          <p class="view-page-desc">
-            Sổ bộ kiểm toán ghi nhận mọi biến động tài khoản Zalo Enterprise, phục vụ tra soát tuân thủ và giải trình Quota.
-          </p>
-        </div>
-        <div class="view-header-actions">
-          <button class="btn btn-outline btn-sm" id="btn-export-audit">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span>Xuất file kiểm toán</span>
+          <button class="h-7 px-3 rounded-lg border border-primary/40 text-primary bg-primary/5 hover:bg-primary/15 text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+            onclick="openQuotaManageModal('${region.name}')" title="Điều chỉnh quota cho ${region.name}">
+            <span class="material-symbols-outlined text-[14px]">tune</span>
+            Điều chỉnh
+          </button>
+          <button class="h-7 px-2.5 rounded-lg border border-outline-variant/60 text-slate-600 bg-surface-container-low hover:bg-surface-container-high text-[11px] font-medium flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+            onclick="toggleRegionBranches('${region.id}')" title="Xem/ẩn chi nhánh">
+            <span class="material-symbols-outlined text-[14px]">table_rows</span>
+            Chi nhánh
+            <span id="branch-arrow-${region.id}" class="material-symbols-outlined text-[15px] text-slate-400 transition-transform duration-200">expand_more</span>
           </button>
         </div>
       </div>
 
-      <div class="table-card">
-        <div class="table-card-header">
-          <div class="table-card-titles">
-            <h2 class="table-card-title">Lịch sử Thao tác Hành chính</h2>
-            <span class="table-card-desc">Chuẩn 5 trường thông tin kiểm toán cốt lõi</span>
-          </div>
-          <div class="table-card-filters">
-            <div class="table-search-box">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-              <input type="text" class="input-sm" id="audit-search-input" 
-                     placeholder="Tìm trong nhật ký..." value="${escapeHtml(state.auditFilters.search)}">
-            </div>
-          </div>
-        </div>
-
-        <div class="table-responsive">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th style="width: 160px;">THỜI GIAN</th>
-                <th style="width: 220px;">NGƯỜI THỰC HIỆN</th>
-                <th style="width: 140px;">THAO TÁC</th>
-                <th style="width: 280px;">NHÂN VIÊN & ACCOUNT</th>
-                <th style="width: 200px;">CHI NHÁNH</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredLogs.length === 0 ? `
-                <tr>
-                  <td colspan="5" class="table-empty-cell">Chưa ghi nhận sự kiện nào trong sổ nhật ký.</td>
-                </tr>
-              ` : filteredLogs.map(l => `
-                <tr>
-                  <td><span class="text-secondary font-mono">${l.timestamp}</span></td>
-                  <td><strong>${escapeHtml(l.actor)}</strong></td>
-                  <td>${renderAuditActionBadge(l.action)}</td>
-                  <td>
-                    <div class="audit-target-group">
-                      <span class="font-semibold">${escapeHtml(l.target)}</span>
-                      <span class="audit-impact-note">${escapeHtml(l.impact || '')}</span>
-                    </div>
-                  </td>
-                  <td><span class="branch-tag">${escapeHtml(l.branch)}</span></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div class="table-card-footer">
-          <span class="footer-count-text">Tổng cộng <strong>${filteredLogs.length}</strong> sự kiện được ghi vết bất biến</span>
-        </div>
+      <!-- Expandable Branch Table -->
+      <div id="branch-list-${region.id}" class="overflow-x-auto hidden">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="bg-surface-container-lowest text-[11px] font-bold text-slate-500 border-t border-b border-outline-variant/40">
+              <th class="py-2 px-4">Chi nhánh</th>
+              <th class="py-2 px-3 text-center">Quota cấp</th>
+              <th class="py-2 px-3 text-center">Đang dùng</th>
+              <th class="py-2 px-3 text-center">Chờ/Khóa</th>
+              <th class="py-2 px-3 text-center">Khả dụng</th>
+              <th class="py-2 px-4 text-center">Tỷ lệ khai thác</th>
+              <th class="py-2 px-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${branchesRows}
+          </tbody>
+        </table>
       </div>
     `;
 
-    container.innerHTML = html;
+    quotaContainer.appendChild(card);
+  });
+}
 
-    const auditSearch = document.getElementById('audit-search-input');
-    if (auditSearch) {
-      auditSearch.addEventListener('input', (e) => {
-        state.auditFilters.search = e.target.value;
-        renderApp();
-      });
-    }
-
-    const exportBtn = document.getElementById('btn-export-audit');
-    if (exportBtn) {
-      exportBtn.addEventListener('click', () => {
-        exportAuditCSV();
-      });
-    }
+// -----------------------------------------------------------------
+// UNIFIED QUOTA MANAGEMENT MODAL (CR-001 - Super Admin Only)
+// -----------------------------------------------------------------
+function openQuotaManageModal(selectedRegion) {
+  // If not explicitly provided, smart-fallback: check if account table is filtered by region
+  if (!selectedRegion) {
+    selectedRegion = (AppState.accountFilters && AppState.accountFilters.region !== 'all')
+      ? AppState.accountFilters.region
+      : 'all';
   }
 
-  function renderAuditActionBadge(action) {
-    if (action.includes('Cấp')) {
-      return `<span class="audit-badge audit-badge-green">${action}</span>`;
-    } else if (action.includes('Bàn giao')) {
-      return `<span class="audit-badge audit-badge-blue">${action}</span>`;
-    } else if (action.includes('Tạm khóa')) {
-      return `<span class="audit-badge audit-badge-orange">${action}</span>`;
-    } else if (action.includes('Mở khóa')) {
-      return `<span class="audit-badge audit-badge-teal">${action}</span>`;
-    } else if (action.includes('Thu hồi')) {
-      return `<span class="audit-badge audit-badge-red">${action}</span>`;
-    }
-    return `<span class="audit-badge">${action}</span>`;
-  }
-
-  // =========================================================================
-  // 7. SIDE DRAWER CONTROLLER (NGĂN TRƯỢT CẠNH PHẢI D-019)
-  // =========================================================================
-
-  function openSideDrawer(empId) {
-    state.selectedDrawerId = empId;
-    renderSideDrawer();
-  }
-
-  function closeSideDrawer() {
-    state.selectedDrawerId = null;
-    const drawer = document.getElementById('side-drawer');
-    const backdrop = document.getElementById('side-drawer-backdrop');
-    if (drawer) drawer.classList.remove('open');
-    if (backdrop) backdrop.style.display = 'none';
-  }
-
-  function renderSideDrawer() {
-    const drawer = document.getElementById('side-drawer');
-    const backdrop = document.getElementById('side-drawer-backdrop');
-    if (!drawer || !backdrop) return;
-
-    if (!state.selectedDrawerId) {
-      drawer.classList.remove('open');
-      backdrop.style.display = 'none';
-      return;
-    }
-
-    const emp = state.employees.find(e => e.id === state.selectedDrawerId);
-    if (!emp) {
-      closeSideDrawer();
-      return;
-    }
-
-    backdrop.style.display = 'block';
-    drawer.classList.add('open');
-
-    const drawerTitle = document.getElementById('drawer-title');
-    const drawerSubtitle = document.getElementById('drawer-subtitle');
-    if (drawerTitle) drawerTitle.textContent = emp.name;
-    if (drawerSubtitle) drawerSubtitle.textContent = emp.email ? `${emp.code} • ${emp.email}` : `${emp.code} • Chưa cấp email`;
-
-    const drawerBody = document.getElementById('drawer-body');
-    if (drawerBody) {
-      drawerBody.innerHTML = `
-        ${emp.attentionReason ? `
-          <div class="drawer-alert-banner">
-            <div class="alert-icon">⚠</div>
-            <div class="alert-text">
-              <strong>Yêu cầu chú ý:</strong> ${escapeHtml(emp.attentionReason)}
-            </div>
-          </div>
-        ` : ''}
-
-        <div class="drawer-section-card">
-          <div class="drawer-section-title">Hồ sơ Nhân sự Doanh nghiệp</div>
-          <div class="drawer-info-grid">
-            <div class="drawer-info-cell">
-              <span class="drawer-cell-label">Họ và tên</span>
-              <span class="drawer-cell-value">${escapeHtml(emp.name)}</span>
-            </div>
-            <div class="drawer-info-cell">
-              <span class="drawer-cell-label">Mã nhân viên</span>
-              <span class="drawer-cell-value font-mono">${emp.code}</span>
-            </div>
-            <div class="drawer-info-cell">
-              <span class="drawer-cell-label">Email công ty</span>
-              <span class="drawer-cell-value">${escapeHtml(emp.email || '— (Chưa cấp)')}</span>
-            </div>
-            <div class="drawer-info-cell">
-              <span class="drawer-cell-label">Trạng thái nhân sự</span>
-              <span class="drawer-cell-value">
-                ${emp.employeeStatus === 'Terminated' ? '<span class="text-red font-semibold">Đã nghỉ việc</span>' : 'Đang làm việc'}
-              </span>
-            </div>
-            <div class="drawer-info-cell">
-              <span class="drawer-cell-label">Chi nhánh trực thuộc</span>
-              <span class="drawer-cell-value">${escapeHtml(emp.branchName)} (${emp.branchId})</span>
-            </div>
-            <div class="drawer-info-cell">
-              <span class="drawer-cell-label">Vùng</span>
-              <span class="drawer-cell-value">${emp.region}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="drawer-section-card">
-          <div class="drawer-section-title">Tài khoản Zalo Enterprise & Quota</div>
-          ${emp.accountId ? `
-            <div class="drawer-info-grid mb-14">
-              <div class="drawer-info-cell">
-                <span class="drawer-cell-label">Mã tài khoản Zalo</span>
-                <span class="drawer-cell-value font-mono text-primary">${emp.accountId}</span>
-              </div>
-              <div class="drawer-info-cell">
-                <span class="drawer-cell-label">Ngày cấp Zalo</span>
-                <span class="drawer-cell-value">${emp.zaloAssignedDate || '—'}</span>
-              </div>
-              <div class="drawer-info-cell">
-                <span class="drawer-cell-label">Trạng thái tài khoản</span>
-                <span class="drawer-cell-value">
-                  ${emp.accountStatus === 'Active' ? '<span class="num-green font-semibold">Đang hoạt động</span>' : (emp.accountStatus === 'Pending' ? '<span class="font-semibold" style="color: #d97706;">Chờ kích hoạt</span>' : '<span class="num-red font-semibold">Tạm khóa</span>')}
-                </span>
-              </div>
-              <div class="drawer-info-cell">
-                <span class="drawer-cell-label">Tình trạng tài khoản</span>
-                <span class="drawer-cell-value text-primary font-semibold">Đã phân bổ</span>
-              </div>
-              <div class="drawer-info-cell">
-                <span class="drawer-cell-label">Hoạt động gần nhất</span>
-                <span class="drawer-cell-value">${emp.lastActiveDate || '—'}</span>
-              </div>
-            </div>
-
-            <div class="drawer-leads-highlight">
-              <div>
-                <div class="drawer-cell-label">Khách hàng & Leads tích lũy</div>
-                <div class="text-secondary text-sm">Số lượng hội thoại/leads gắn liền với tài khoản</div>
-              </div>
-              <div class="drawer-leads-number">★ ${emp.leadCount}</div>
-            </div>
-          ` : `
-            <div class="empty-state-box">
-              Nhân viên hiện chưa được cấp tài khoản Zalo Enterprise. Chưa tiêu tốn Quota nào.
-            </div>
-          `}
-        </div>
-
-        <div class="drawer-section-card">
-          <div class="drawer-section-title">Lịch sử Thao tác Gần nhất</div>
-          <div class="drawer-timeline">
-            ${getEmployeeTimeline(emp).map(step => `
-              <div class="timeline-step">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-                  <span class="timeline-time">${escapeHtml(step.time)}</span>
-                  ${step.actor ? `<span class="timeline-actor">👤 Người thực hiện: <strong>${escapeHtml(step.actor)}</strong></span>` : ''}
-                </div>
-                <span class="timeline-desc">${escapeHtml(step.desc)}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
-    }
-
-    const drawerFooter = document.getElementById('drawer-footer');
-    if (drawerFooter) {
-      if (emp.accountStatus === 'Unassigned') {
-        drawerFooter.innerHTML = `
-          <button class="btn btn-outline" id="drawer-btn-close">Đóng</button>
-          <button class="btn btn-primary" id="drawer-btn-assign">Cấp account</button>
-        `;
-      } else if (emp.accountStatus === 'Pending') {
-        drawerFooter.innerHTML = `
-          <button class="btn btn-outline" id="drawer-btn-close">Đóng</button>
-          <button class="btn btn-outline btn-danger" id="drawer-btn-revoke">Thu hồi</button>
-          <button class="btn btn-outline btn-warn" id="drawer-btn-remind">Gửi nhắc nhở</button>
-          <button class="btn btn-primary" id="drawer-btn-activate">Kích hoạt ngay</button>
-        `;
-        const btnClose = document.getElementById('drawer-btn-close');
-        if (btnClose) btnClose.addEventListener('click', closeSideDrawer);
-        const btnRevoke = document.getElementById('drawer-btn-revoke');
-        if (btnRevoke) btnRevoke.addEventListener('click', () => { closeSideDrawer(); openRevokeModal(emp.id); });
-        const btnRemind = document.getElementById('drawer-btn-remind');
-        if (btnRemind) btnRemind.addEventListener('click', () => {
-          state.auditLogs.unshift({
-            id: `LOG-${Date.now().toString().slice(-4)}`,
-            timestamp: '25/09/2026 14:25',
-            actor: getActorName(),
-            action: 'Nhắc nhở kích hoạt tài khoản',
-            target: `${emp.name} (${emp.accountId})`,
-            branch: `${emp.branchName} (${emp.branchId})`,
-            impact: `Gửi nhắc nhở kích hoạt qua Side Drawer tới ${emp.email}`
-          });
-          state.selectedDrawerId = emp.id;
-          saveState();
-          showToast(`Đã gửi thông báo nhắc kích hoạt tới ${emp.email}`, 'success');
-          renderApp();
-          openSideDrawer(emp.id);
-        });
-        const btnActivate = document.getElementById('drawer-btn-activate');
-        if (btnActivate) btnActivate.addEventListener('click', () => {
-          emp.accountStatus = 'Active';
-          emp.attentionReason = null;
-          emp.pendingOverdue = false;
-          state.auditLogs.unshift({
-            id: `LOG-${Date.now().toString().slice(-4)}`,
-            timestamp: '25/09/2026 14:26',
-            actor: getActorName(),
-            action: 'Kích hoạt tài khoản Zalo',
-            target: `${emp.name} (${emp.accountId})`,
-            branch: `${emp.branchName} (${emp.branchId})`,
-            impact: 'Kích hoạt thành công tài khoản Zalo Enterprise qua Side Drawer'
-          });
-          state.selectedDrawerId = emp.id;
-          saveState();
-          showToast(`Đã kích hoạt thành công tài khoản ${emp.accountId}`, 'success');
-          renderApp();
-          openSideDrawer(emp.id);
-        });
-      } else if (emp.accountStatus === 'Active') {
-        drawerFooter.innerHTML = `
-          <button class="btn btn-outline" id="drawer-btn-close">Đóng</button>
-          <button class="btn btn-outline btn-warn" id="drawer-btn-suspend">Tạm khóa</button>
-          <button class="btn btn-outline btn-danger" id="drawer-btn-revoke">Thu hồi</button>
-          <button class="btn btn-primary" id="drawer-btn-handover">Bàn giao tài khoản</button>
-        `;
-      } else if (emp.accountStatus === 'Suspended') {
-        drawerFooter.innerHTML = `
-          <button class="btn btn-outline" id="drawer-btn-close">Đóng</button>
-          <button class="btn btn-outline btn-danger" id="drawer-btn-revoke">Thu hồi</button>
-          <button class="btn btn-primary" id="drawer-btn-unlock">Mở khóa tài khoản</button>
-        `;
-      } else {
-        drawerFooter.innerHTML = `
-          <button class="btn btn-outline" id="drawer-btn-close">Đóng</button>
-        `;
-      }
-
-      const btnClose = document.getElementById('drawer-btn-close');
-      if (btnClose) btnClose.addEventListener('click', closeSideDrawer);
-
-      const btnAssign = document.getElementById('drawer-btn-assign');
-      if (btnAssign) btnAssign.addEventListener('click', () => { closeSideDrawer(); openAssignModal(emp.id); });
-
-      const btnHandover = document.getElementById('drawer-btn-handover');
-      if (btnHandover) btnHandover.addEventListener('click', () => { closeSideDrawer(); openHandoverModal(emp.id); });
-
-      const btnSuspend = document.getElementById('drawer-btn-suspend');
-      if (btnSuspend) btnSuspend.addEventListener('click', () => { closeSideDrawer(); openSuspendModal(emp.id); });
-
-      const btnUnlock = document.getElementById('drawer-btn-unlock');
-      if (btnUnlock) btnUnlock.addEventListener('click', () => { closeSideDrawer(); openUnlockModal(emp.id); });
-
-      const btnRevoke = document.getElementById('drawer-btn-revoke');
-      if (btnRevoke) btnRevoke.addEventListener('click', () => { closeSideDrawer(); openRevokeModal(emp.id); });
-    }
-
-    const closeBtnTop = document.getElementById('drawer-close-btn');
-    if (closeBtnTop) closeBtnTop.addEventListener('click', closeSideDrawer);
-    backdrop.addEventListener('click', closeSideDrawer);
-  }
-
-  function getEmployeeTimeline(emp) {
-    const steps = [];
-
-    // 1. Lấy tất cả lịch sử thao tác liên quan đến nhân sự này hoặc tài khoản của họ từ auditLogs
-    if (state.auditLogs && Array.isArray(state.auditLogs)) {
-      state.auditLogs.forEach(log => {
-        const matchName = emp.name && log.target && log.target.includes(emp.name);
-        const matchAcc = emp.accountId && log.target && log.target.includes(emp.accountId);
-        if (matchName || matchAcc) {
-          steps.push({
-            time: log.timestamp || '25/09/2026',
-            desc: `${log.action}: ${log.impact || log.target}`,
-            actor: log.actor || 'Super Admin'
-          });
-        }
-      });
-    }
-
-    // 2. Nếu chưa có mốc cấp phát trong auditLogs và nhân sự đã có tài khoản
-    if (emp.zaloAssignedDate) {
-      const hasAssign = steps.some(s => s.desc.toLowerCase().includes('cấp') || s.desc.toLowerCase().includes('bàn giao'));
-      if (!hasAssign) {
-        steps.push({
-          time: `${emp.zaloAssignedDate} 09:00`,
-          desc: `Khởi tạo & cấp phát tài khoản ${emp.accountId || ''}`,
-          actor: 'Vũ Minh Tuấn (Super Admin)'
-        });
-      }
-    }
-
-    // 3. Nếu đang bị tạm khóa nhưng chưa có log khóa
-    if (emp.accountStatus === 'Suspended') {
-      const hasSuspend = steps.some(s => s.desc.toLowerCase().includes('khóa'));
-      if (!hasSuspend) {
-        steps.push({
-          time: '14/09/2026 14:00',
-          desc: `Tạm khóa tài khoản do ${emp.attentionReason || 'yêu cầu hành chính'}`,
-          actor: 'Lê Hoàng Nam (Admin Chi nhánh)'
-        });
-      }
-    }
-
-    // 4. Nếu đã bàn giao nhưng chưa có log bàn giao
-    if (emp.accountStatus === 'HandedOver') {
-      const hasHandover = steps.some(s => s.desc.toLowerCase().includes('bàn giao'));
-      if (!hasHandover) {
-        steps.push({
-          time: '10/09/2026 10:30',
-          desc: `Bàn giao tài khoản Zalo sang nhân sự ${emp.handedOverTo || 'mới'}`,
-          actor: 'Lê Hoàng Nam (Admin Chi nhánh)'
-        });
-      }
-    }
-
-    // 5. Nếu có hoạt động gần nhất
-    if (emp.lastActiveDate) {
-      steps.push({
-        time: `${emp.lastActiveDate} 16:45`,
-        desc: 'Tương tác khách hàng: Gửi/nhận tin nhắn Zalo Enterprise gần nhất',
-        actor: `${emp.name} (Nhân viên)`
-      });
-    }
-
-    if (steps.length === 0) {
-      steps.push({
-        time: 'Hôm nay',
-        desc: 'Chưa có lịch sử phát sinh giao dịch Quota',
-        actor: 'Hệ thống Quota'
-      });
-    }
-
-    return steps;
-  }
-
-  // =========================================================================
-  // 8. MODAL CONTROLLERS & WORKFLOW NGHIỆP VỤ (D-014, D-015)
-  // =========================================================================
-
-  function openAssignModal(preselectedEmpId = null, preferredAccountId = null) {
-    const isBranchAdmin = state.currentPersona === 'branch_admin';
-    const targetBranch = isBranchAdmin ? 'HCM-01' : (state.quotaFilters.branch !== 'ALL' ? state.quotaFilters.branch : 'HCM-01');
-
-    const candidates = state.employees.filter(e => e.branchId === targetBranch && e.accountStatus === 'Unassigned');
-    const branchStats = getBranchQuotaStats(targetBranch);
-    const revokedInBranch = state.revokedAccounts.filter(r => r.branchId === targetBranch);
-
-    if (branchStats.available <= 0 && revokedInBranch.length === 0) {
-      openModal({
-        title: 'Chi nhánh đã hết Quota khả dụng',
-        content: `
-          <div class="impact-box" style="border-left: 4px solid var(--color-red);">
-            <strong>Cảnh báo:</strong> Chi nhánh <strong>${branchStats.branchName}</strong> hiện có 0 Quota chưa sử dụng và không còn tài khoản thu hồi nào trong kho.
-            Không thể thực hiện cấp mới cho nhân sự vào thời điểm này.
-          </div>
-        `,
-        confirmText: 'Đã hiểu',
-        confirmClass: 'btn-outline',
-        onConfirm: () => closeModal()
-      });
-      return;
-    }
-
-    let defaultEmpId = preselectedEmpId || (candidates.length > 0 ? candidates[0].id : '');
-    let defaultAccMode = preferredAccountId ? 'REVOKED' : (revokedInBranch.length > 0 ? 'REVOKED' : 'NEW');
-    let selectedRevokedAcc = preferredAccountId || (revokedInBranch.length > 0 ? revokedInBranch[0].accountId : '');
-
-    const renderContent = () => `
-      <div class="form-field mb-14">
-        <label class="form-label">Chọn nhân viên nhận tài khoản:</label>
-        ${candidates.length === 0 ? `
-          <div class="empty-state-box">Không còn nhân sự nào ở trạng thái 'Chưa cấp' trong chi nhánh này.</div>
-        ` : `
-          <select class="form-select-box" id="assign-emp-select">
-            ${candidates.map(c => `
-              <option value="${c.id}" ${c.id === defaultEmpId ? 'selected' : ''}>
-                ${escapeHtml(c.name)} (${c.code}) — ${escapeHtml(c.email)}
-              </option>
-            `).join('')}
-          </select>
-        `}
-      </div>
-
-      <div class="form-field mb-14">
-        <label class="form-label">Phương thức cấp tài khoản Zalo Enterprise:</label>
-        
-        <div class="grant-method-card priority-card ${defaultAccMode === 'REVOKED' ? 'selected' : ''}" id="card-mode-revoked">
-          <div class="flex-between">
-            <strong>★ Tái cấp từ Kho tài khoản đã thu hồi (Bảo tồn Leads)</strong>
-            <span class="badge-priority-leads">Khuyên dùng</span>
-          </div>
-          <p class="text-secondary text-sm mt-4">
-            Gán tài khoản cũ đã thu hồi kèm toàn bộ danh bạ/leads khách hàng tồn dư cho nhân viên mới tiếp quản.
-          </p>
-          ${revokedInBranch.length > 0 ? `
-            <div class="mt-8" id="revoked-dropdown-wrap" style="${defaultAccMode === 'REVOKED' ? '' : 'display:none;'}">
-              <select class="form-select-box" id="assign-revoked-account-select">
-                ${revokedInBranch.map(r => `
-                  <option value="${r.accountId}" ${r.accountId === selectedRevokedAcc ? 'selected' : ''}>
-                    ${r.accountId} — ${r.leadCount} Leads (Chủ cũ: ${escapeHtml(r.previousOwnerName)})
-                  </option>
-                `).join('')}
-              </select>
-            </div>
-          ` : `
-            <span class="text-muted text-xs mt-4 block">(Hiện kho chi nhánh không có account đã thu hồi nào)</span>
-          `}
-        </div>
-
-        <div class="grant-method-card mt-8 ${defaultAccMode === 'NEW' ? 'selected' : ''}" id="card-mode-new">
-          <div class="flex-between">
-            <strong>Cấp tài khoản Zalo Enterprise mới hoàn toàn</strong>
-            <span class="text-muted text-xs">Còn ${branchStats.available} Quota trống</span>
-          </div>
-          <p class="text-secondary text-sm mt-4">
-            Hệ thống sẽ cấp 1 mã ZENT mới và trừ trực tiếp 1 điểm Quota khả dụng của chi nhánh.
-          </p>
-        </div>
-      </div>
-
-      <div class="impact-box">
-        <div class="impact-box-title">Tác động Quota & Vận hành:</div>
-        <div class="impact-item">
-          <span>Chi nhánh áp dụng:</span>
-          <strong>${branchStats.branchName} (${targetBranch})</strong>
-        </div>
-        <div class="impact-item">
-          <span>Biến động Quota khả dụng:</span>
-          <strong class="num-green">-1 Quota (Đang dùng +1)</strong>
-        </div>
-        <div class="impact-item">
-          <span>Trạng thái sau cấp:</span>
-          <strong class="num-green">Đang hoạt động (Active)</strong>
-        </div>
-      </div>
-    `;
-
-    openModal({
-      title: 'Cấp Tài Khoản Zalo Enterprise',
-      content: renderContent(),
-      confirmText: 'Xác nhận cấp account',
-      confirmClass: 'btn-primary',
-      onConfirm: () => {
-        const empSelect = document.getElementById('assign-emp-select');
-        if (!empSelect) return;
-        const empId = empSelect.value;
-        const emp = state.employees.find(e => e.id === empId);
-        if (!emp) return;
-
-        let finalAccountId = '';
-        let assignedLeads = 0;
-
-        if (defaultAccMode === 'REVOKED' && revokedInBranch.length > 0) {
-          const revSelect = document.getElementById('assign-revoked-account-select');
-          finalAccountId = revSelect ? revSelect.value : selectedRevokedAcc;
-          const revIndex = state.revokedAccounts.findIndex(r => r.accountId === finalAccountId);
-          if (revIndex !== -1) {
-            assignedLeads = state.revokedAccounts[revIndex].leadCount;
-            state.revokedAccounts.splice(revIndex, 1);
-          }
-        } else {
-          const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-          finalAccountId = `ZENT-00${randomSuffix}`;
-          assignedLeads = 0;
-        }
-
-        emp.accountId = finalAccountId;
-        emp.accountStatus = 'Active';
-        emp.zaloAssignedDate = '25/09/2026';
-        emp.leadCount = assignedLeads;
-        emp.lastActiveDate = '25/09/2026';
-        emp.attentionReason = null;
-
-        state.auditLogs.unshift({
-          id: `LOG-${Date.now().toString().slice(-4)}`,
-          timestamp: '25/09/2026 11:35',
-          actor: getActorName(),
-          action: defaultAccMode === 'REVOKED' ? 'Tái cấp account' : 'Cấp mới account',
-          target: `${emp.name} (${finalAccountId})`,
-          branch: `${emp.branchName} (${emp.branchId})`,
-          impact: defaultAccMode === 'REVOKED' ? `Tái cấp kèm ${assignedLeads} leads (Đang dùng +1, Chưa dùng -1)` : 'Cấp mới hoàn toàn (Đang dùng +1, Chưa dùng -1)'
-        });
-
-        state.selectedDrawerId = emp.id;
-        saveState();
-        closeModal();
-        showToast(`Đã cấp thành công tài khoản ${finalAccountId} cho ${emp.name}`, 'success');
-        renderApp();
-        openSideDrawer(emp.id);
-      }
-    });
-
-    setTimeout(() => {
-      const cardRevoked = document.getElementById('card-mode-revoked');
-      const cardNew = document.getElementById('card-mode-new');
-      const revWrap = document.getElementById('revoked-dropdown-wrap');
-
-      if (cardRevoked && revokedInBranch.length > 0) {
-        cardRevoked.addEventListener('click', () => {
-          defaultAccMode = 'REVOKED';
-          cardRevoked.classList.add('selected');
-          if (cardNew) cardNew.classList.remove('selected');
-          if (revWrap) revWrap.style.display = 'block';
-        });
-      }
-
-      if (cardNew) {
-        cardNew.addEventListener('click', () => {
-          defaultAccMode = 'NEW';
-          cardNew.classList.add('selected');
-          if (cardRevoked) cardRevoked.classList.remove('selected');
-          if (revWrap) revWrap.style.display = 'none';
-        });
-      }
-    }, 50);
-  }
-
-  function openReassignRevokedModal(accountId) {
-    const rev = state.revokedAccounts.find(r => r.accountId === accountId);
-    if (!rev) return;
-    openAssignModal(null, accountId);
-  }
-
-  function openHandoverModal(sourceEmpId) {
-    const sourceEmp = state.employees.find(e => e.id === sourceEmpId);
-    if (!sourceEmp) return;
-
-    if (sourceEmp.accountStatus === 'Suspended') {
-      openModal({
-        title: 'Yêu cầu Mở khóa trước khi Bàn giao',
-        content: `
-          <div class="impact-box" style="border-left: 4px solid var(--color-orange);">
-            Tài khoản <strong>${sourceEmp.accountId}</strong> hiện đang ở trạng thái <strong>Tạm khóa</strong>.
-            Theo quy định bảo mật, Admin bắt buộc phải thực hiện <strong>Mở khóa tài khoản</strong> trước rồi mới được phép tiến hành bàn giao sang nhân sự khác.
-          </div>
-        `,
-        confirmText: 'Mở khóa ngay',
-        confirmClass: 'btn-primary',
-        onConfirm: () => {
-          closeModal();
-          openUnlockModal(sourceEmp.id);
-        }
-      });
-      return;
-    }
-
-    const candidates = state.employees.filter(e => e.branchId === sourceEmp.branchId && e.id !== sourceEmp.id && e.accountStatus === 'Unassigned');
-
-    if (candidates.length === 0) {
-      openModal({
-        title: 'Không có nhân sự tiếp nhận phù hợp',
-        content: `
-          <div class="impact-box">
-            Không tìm thấy nhân viên nào ở trạng thái <strong>Chưa cấp account</strong> trong cùng chi nhánh <strong>${sourceEmp.branchName}</strong>.
-            Bạn có thể thực hiện <strong>Thu hồi tài khoản</strong> để đưa về kho lưu trữ và bảo tồn ${sourceEmp.leadCount} leads khách hàng chờ tái cấp sau.
-          </div>
-        `,
-        confirmText: 'Đóng',
-        confirmClass: 'btn-outline',
-        onConfirm: () => closeModal()
-      });
-      return;
-    }
-
-    openModal({
-      title: 'Bàn Giao Tài Khoản Zalo Enterprise',
-      content: `
-        <div class="impact-box mb-14" style="border-left: 4px solid var(--primary);">
-          Bàn giao tài khoản <strong>${sourceEmp.accountId}</strong> cùng toàn bộ <strong>${sourceEmp.leadCount} leads khách hàng</strong> từ <strong>${escapeHtml(sourceEmp.name)}</strong> sang nhân sự tiếp nhận mới trong cùng chi nhánh.
-        </div>
-
-        <div class="form-field mb-14">
-          <label class="form-label">Chọn nhân sự tiếp nhận trong chi nhánh:</label>
-          <select class="form-select-box" id="handover-target-select">
-            ${candidates.map(c => `
-              <option value="${c.id}">${escapeHtml(c.name)} (${c.code}) — ${escapeHtml(c.email)}</option>
-            `).join('')}
-          </select>
-        </div>
-
-        <div class="impact-box">
-          <div class="impact-box-title">Tác động Nghiệp vụ & Quota:</div>
-          <div class="impact-item">
-            <span>Tài khoản bàn giao:</span>
-            <strong class="font-mono">${sourceEmp.accountId}</strong>
-          </div>
-          <div class="impact-item">
-            <span>Biến động Quota chi nhánh:</span>
-            <strong class="num-green">0 Quota (Không đổi)</strong>
-          </div>
-          <div class="impact-item">
-            <span>Trạng thái người cũ (${sourceEmp.name}):</span>
-            <strong>Đã bàn giao</strong>
-          </div>
-          <div class="impact-item">
-            <span>Trạng thái người mới:</span>
-            <strong class="num-green">Đang hoạt động (Active)</strong>
-          </div>
-        </div>
-      `,
-      confirmText: 'Xác nhận bàn giao',
-      confirmClass: 'btn-primary',
-      onConfirm: () => {
-        const targetSelect = document.getElementById('handover-target-select');
-        if (!targetSelect) return;
-        const targetEmpId = targetSelect.value;
-        const targetEmp = state.employees.find(e => e.id === targetEmpId);
-        if (!targetEmp) return;
-
-        const accId = sourceEmp.accountId;
-        const leads = sourceEmp.leadCount;
-
-        targetEmp.accountId = accId;
-        targetEmp.accountStatus = 'Active';
-        targetEmp.zaloAssignedDate = '25/09/2026';
-        targetEmp.leadCount = leads;
-        targetEmp.lastActiveDate = '25/09/2026';
-        targetEmp.attentionReason = null;
-
-        sourceEmp.accountId = null;
-        sourceEmp.accountStatus = 'Unassigned';
-        sourceEmp.accountId = null;
-        sourceEmp.email = null; // Mất tài khoản thì không còn email
-        sourceEmp.leadCount = 0;
-        sourceEmp.attentionReason = null;
-        sourceEmp.zaloAssignedDate = null;
-
-        targetEmp.accountId = accId;
-        targetEmp.email = targetEmp.email || (targetEmp.name.toLowerCase().replace(/\s+/g, '') + '@fpt.com.vn');
-        targetEmp.accountStatus = 'Pending'; // Người mới ở trạng thái Chờ kích hoạt
-        targetEmp.zaloAssignedDate = '25/09/2026';
-        targetEmp.pendingAssignedAt = '25/09/2026 14:35';
-        targetEmp.pendingHours = 0;
-        targetEmp.pendingOverdue = false;
-        targetEmp.attentionReason = null;
-
-        state.auditLogs.unshift({
-          id: `LOG-${Date.now().toString().slice(-4)}`,
-          timestamp: '25/09/2026 11:36',
-          actor: getActorName(),
-          action: 'Bàn giao',
-          target: `${sourceEmp.name} ➔ ${targetEmp.name} (${accId})`,
-          branch: `${sourceEmp.branchName} (${sourceEmp.branchId})`,
-          impact: `Quota giữ nguyên (Chuyển quyền sở hữu kèm ${leads} leads)`
-        });
-
-        state.selectedDrawerId = targetEmp.id;
-        saveState();
-        closeModal();
-        showToast(`Đã bàn giao tài khoản ${accId} cho ${targetEmp.name}`, 'success');
-        renderApp();
-        openSideDrawer(targetEmp.id);
-      }
-    });
-  }
-
-  function openSuspendModal(empId) {
-    const emp = state.employees.find(e => e.id === empId);
-    if (!emp) return;
-
-    openModal({
-      title: 'Tạm Khóa Tài Khoản Zalo Enterprise',
-      content: `
-        <div class="impact-box mb-14" style="border-left: 4px solid var(--color-orange);">
-          Bạn đang thực hiện tạm khóa tài khoản <strong>${emp.accountId}</strong> của nhân sự <strong>${escapeHtml(emp.name)}</strong>.
-          Nhân viên sẽ không thể đăng nhập hoặc trao đổi với khách hàng trên Zalo Enterprise.
-        </div>
-
-        <div class="form-field mb-14">
-          <label class="form-label">Lý do tạm khóa:</label>
-          <select class="form-select-box mb-8" id="suspend-reason-preset">
-            <option value="Tạm đình chỉ phục vụ thanh tra nội bộ">Tạm đình chỉ phục vụ thanh tra nội bộ</option>
-            <option value="Nhân viên nghỉ phép dài hạn / thai sản">Nhân viên nghỉ phép dài hạn / thai sản</option>
-            <option value="Vi phạm quy chuẩn giao tiếp với khách hàng">Vi phạm quy chuẩn giao tiếp với khách hàng</option>
-            <option value="Yêu cầu từ phòng Pháp chế & KSNB">Yêu cầu từ phòng Pháp chế & KSNB</option>
-          </select>
-        </div>
-
-        <div class="impact-box">
-          <div class="impact-box-title">Tác động Quota (Bất biến):</div>
-          <div class="impact-item">
-            <span>Biến động Quota khả dụng:</span>
-            <strong>Không ảnh hưởng chỉ tiêu chi nhánh</strong>
-          </div>
-          <div class="impact-item">
-            <span>Trạng thái sau thao tác:</span>
-            <strong class="num-red">Tạm khóa (Suspended)</strong>
-          </div>
-        </div>
-      `,
-      confirmText: 'Xác nhận tạm khóa',
-      confirmClass: 'btn-outline btn-warn',
-      onConfirm: () => {
-        const reasonSelect = document.getElementById('suspend-reason-preset');
-        const reason = reasonSelect ? reasonSelect.value : 'Tạm khóa theo quy định';
-
-        emp.accountStatus = 'Suspended';
-        emp.attentionReason = reason;
-
-        state.auditLogs.unshift({
-          id: `LOG-${Date.now().toString().slice(-4)}`,
-          timestamp: '25/09/2026 11:37',
-          actor: getActorName(),
-          action: 'Tạm khóa',
-          target: `${emp.name} (${emp.accountId})`,
-          branch: `${emp.branchName} (${emp.branchId})`,
-          impact: 'Tạm khóa tài khoản'
-        });
-
-        state.selectedDrawerId = emp.id;
-        saveState();
-        closeModal();
-        showToast(`Đã tạm khóa tài khoản ${emp.accountId}`, 'warning');
-        renderApp();
-        openSideDrawer(emp.id);
-      }
-    });
-  }
-
-  function openUnlockModal(empId) {
-    const emp = state.employees.find(e => e.id === empId);
-    if (!emp) return;
-
-    openModal({
-      title: 'Mở Khóa Tài Khoản Zalo Enterprise',
-      content: `
-        <div class="impact-box">
-          Xác nhận khôi phục trạng thái hoạt động cho tài khoản <strong>${emp.accountId}</strong> của nhân sự <strong>${escapeHtml(emp.name)}</strong>.
-          Nhân viên có thể đăng nhập và tiếp tục công tác ngay lập tức.
-        </div>
-      `,
-      confirmText: 'Xác nhận mở khóa',
-      confirmClass: 'btn-primary',
-      onConfirm: () => {
-        emp.accountStatus = 'Active';
-        emp.attentionReason = null;
-
-        state.auditLogs.unshift({
-          id: `LOG-${Date.now().toString().slice(-4)}`,
-          timestamp: '25/09/2026 11:38',
-          actor: getActorName(),
-          action: 'Mở khóa',
-          target: `${emp.name} (${emp.accountId})`,
-          branch: `${emp.branchName} (${emp.branchId})`,
-          impact: 'Quota giữ nguyên'
-        });
-
-        state.selectedDrawerId = emp.id;
-        saveState();
-        closeModal();
-        showToast(`Đã mở khóa tài khoản ${emp.accountId}`, 'success');
-        renderApp();
-        openSideDrawer(emp.id);
-      }
-    });
-  }
-
-  function openRevokeModal(empId) {
-    const emp = state.employees.find(e => e.id === empId);
-    if (!emp || !emp.accountId) return;
-
-    openModal({
-      title: 'Thu Hồi Tài Khoản Về Quỹ Doanh Nghiệp',
-      content: `
-        <div class="impact-box mb-14" style="border-left: 4px solid var(--color-red);">
-          Bạn đang thu hồi tài khoản <strong>${emp.accountId}</strong> từ <strong>${escapeHtml(emp.name)}</strong>.
-          Tài khoản cùng <strong>${emp.leadCount} leads khách hàng</strong> sẽ được chuyển vào <strong>Kho tài khoản đã thu hồi</strong> của chi nhánh để sẵn sàng tái cấp.
-        </div>
-
-        <div class="form-field mb-14">
-          <label class="form-label">Lý do thu hồi:</label>
-          <select class="form-select-box" id="revoke-reason-select">
-            <option value="Nhân viên đã chính thức chấm dứt hợp đồng">Nhân viên đã chính thức chấm dứt hợp đồng</option>
-            <option value="Thu hồi điều tiết Quota chi nhánh">Thu hồi điều tiết Quota chi nhánh</option>
-            <option value="Nhân viên chuyển vị trí không cần dùng Zalo">Nhân viên chuyển vị trí không cần dùng Zalo</option>
-          </select>
-        </div>
-
-        <div class="impact-box">
-          <div class="impact-box-title">Tác động Quota & Kho dữ liệu:</div>
-          <div class="impact-item">
-            <span>Hoàn trả Quota trống:</span>
-            <strong class="num-green">+1 Quota khả dụng (Đang dùng -1)</strong>
-          </div>
-          <div class="impact-item">
-            <span>Bảo tồn Leads khách hàng:</span>
-            <strong class="text-primary font-semibold">${emp.leadCount} leads lưu vào Kho thu hồi</strong>
-          </div>
-          <div class="impact-item">
-            <span>Trạng thái nhân sự cũ:</span>
-            <strong>Chưa cấp (Unassigned)</strong>
-          </div>
-        </div>
-      `,
-      confirmText: 'Xác nhận thu hồi',
-      confirmClass: 'btn-outline btn-danger',
-      onConfirm: () => {
-        const reasonSelect = document.getElementById('revoke-reason-select');
-        const reason = reasonSelect ? reasonSelect.value : 'Thu hồi tài khoản';
-        const accId = emp.accountId;
-        const leads = emp.leadCount;
-
-        state.revokedAccounts.unshift({
-          accountId: accId,
-          branchId: emp.branchId,
-          branchName: emp.branchName,
-          region: emp.region,
-          revokedAt: '25/09/2026',
-          previousOwnerName: emp.name,
-          previousOwnerEmail: emp.email,
-          leadCount: leads,
-          note: `Thu hồi từ ${emp.name}: ${reason}`
-        });
-
-        emp.accountId = null;
-        emp.accountStatus = 'Unassigned';
-        emp.zaloAssignedDate = null;
-        emp.leadCount = 0;
-        emp.attentionReason = null;
-
-        state.auditLogs.unshift({
-          id: `LOG-${Date.now().toString().slice(-4)}`,
-          timestamp: '25/09/2026 11:39',
-          actor: getActorName(),
-          action: 'Thu hồi',
-          target: `${emp.name} (${accId})`,
-          branch: `${emp.branchName} (${emp.branchId})`,
-          impact: `Chưa dùng +1 (Lưu ${leads} leads vào kho thu hồi)`
-        });
-
-        state.selectedDrawerId = emp.id;
-        saveState();
-        closeModal();
-        showToast(`Đã thu hồi tài khoản ${accId}, hoàn trả 1 Quota về quỹ`, 'success');
-        renderApp();
-        openSideDrawer(emp.id);
-      }
-    });
-  }
-
-  // =========================================================================
-  // 9. MODAL GENERIC ENGINE & TOAST HUB
-  // =========================================================================
-
-  function openModal(optionsOrTitle, contentHtml, footerHtml) {
-    const modal = document.getElementById('app-modal');
-    if (!modal) return;
-
-    let title = '';
-    let content = '';
-    let confirmText = 'Xác nhận';
-    let confirmClass = 'btn-primary';
-    let onConfirm = null;
-    let customFooter = null;
-
-    if (typeof optionsOrTitle === 'object' && optionsOrTitle !== null) {
-      title = optionsOrTitle.title || '';
-      content = optionsOrTitle.content || optionsOrTitle.body || '';
-      confirmText = optionsOrTitle.confirmText || 'Xác nhận';
-      confirmClass = optionsOrTitle.confirmClass || 'btn-primary';
-      onConfirm = optionsOrTitle.onConfirm || null;
-      customFooter = optionsOrTitle.footer || null;
-    } else {
-      title = optionsOrTitle || '';
-      content = contentHtml || '';
-      customFooter = footerHtml || null;
-    }
-
-    const titleEl = document.getElementById('modal-title');
-    if (titleEl) titleEl.textContent = title;
-
-    const bodyEl = document.getElementById('modal-body');
-    if (bodyEl) bodyEl.innerHTML = content;
-
-    const footerEl = document.getElementById('modal-footer');
-    if (footerEl) {
-      if (customFooter) {
-        footerEl.innerHTML = customFooter;
-      } else {
-        footerEl.innerHTML = `
-          <button class="btn btn-outline" id="modal-btn-cancel">Hủy bỏ</button>
-          <button class="btn ${confirmClass}" id="modal-btn-confirm">${confirmText}</button>
-        `;
-        const btnCancel = document.getElementById('modal-btn-cancel');
-        if (btnCancel) btnCancel.onclick = closeModal;
-        const btnConfirm = document.getElementById('modal-btn-confirm');
-        if (btnConfirm && onConfirm) btnConfirm.onclick = onConfirm;
-      }
-    }
-
-    modal.style.display = 'flex';
-
-    const closeBtn = document.getElementById('modal-close-btn');
-    if (closeBtn) closeBtn.onclick = closeModal;
-
-    const customCancelBtn = document.getElementById('modal-cancel-btn');
-    if (customCancelBtn) customCancelBtn.onclick = closeModal;
-  }
-
-  function closeModal() {
-    const modal = document.getElementById('app-modal');
-    if (modal) modal.style.display = 'none';
-  }
-
-  function showToast(message, type = 'info') {
-    const hub = document.getElementById('toast-hub');
-    if (!hub) return;
-
-    const toast = document.createElement('div');
-    toast.className = `toast-msg toast-${type}`;
-    toast.innerHTML = `<span>${escapeHtml(message)}</span>`;
-
-    hub.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s ease';
-      setTimeout(() => { if (toast && toast.remove) toast.remove(); }, 300);
-    }, 3200);
-  }
-
-  // =========================================================================
-  // 10. TIỆN ÍCH XUẤT CSV & ĐỔI ROLE PERSONA
-  // =========================================================================
-
-  function exportQuotaCSV() {
-    const rows = [
-      ['VUNG', 'CHI_NHANH', 'MA_CHI_NHANH', 'TONG_QUOTA', 'DANG_DUNG', 'CHUA_DUNG', 'TAM_KHOA', 'CAN_CHU_Y', 'TY_LE_SU_DUNG_PCT']
-    ];
-
-    for (const r of state.orgTree.regions) {
-      for (const b of r.branches) {
-        const stats = getBranchQuotaStats(b.id);
-        rows.push([
-          stats.regionId,
-          stats.branchName,
-          stats.branchId,
-          stats.totalQuota,
-          stats.inUse,
-          stats.available,
-          stats.suspended,
-          stats.attention,
-          stats.utilization
-        ]);
-      }
-    }
-
-    downloadCSV(rows, 'Z_Enterprise_Quota_Allocation.csv');
-    showToast('Đã xuất báo cáo Quota thành công', 'success');
-  }
-
-  function exportAuditCSV() {
-    const rows = [
-      ['THOI_GIAN', 'NGUOI_THUC_HIEN', 'THAO_TAC', 'NHAN_VIEN_ACCOUNT', 'CHI_NHANH', 'TAC_DONG_QUOTA']
-    ];
-
-    state.auditLogs.forEach(l => {
-      rows.push([
-        l.timestamp,
-        l.actor,
-        l.action,
-        l.target,
-        l.branch,
-        l.impact
-      ]);
-    });
-
-    downloadCSV(rows, 'Z_Enterprise_Audit_Log.csv');
-    showToast('Đã xuất sổ nhật ký audit thành công', 'success');
-  }
-
-  function downloadCSV(rows, filename) {
-    const csvContent = '\uFEFF' + rows.map(e => e.map(cell => `\"${cell}\"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
-
-  function togglePersona() {
-    if (state.currentPersona === 'super_admin') {
-      state.currentPersona = 'branch_admin';
-      state.quotaFilters.region = 'South';
-      state.quotaFilters.branch = 'HCM-01';
-      showToast('Đã chuyển sang vai trò: Admin Chi nhánh (Hồ Chí Minh 01)', 'info');
-    } else {
-      state.currentPersona = 'super_admin';
-      state.quotaFilters.region = 'ALL';
-      state.quotaFilters.branch = 'ALL';
-      showToast('Đã chuyển sang vai trò: Super Admin (Toàn quốc)', 'info');
-    }
-    saveState();
-    renderApp();
-  }
-
-
-  // Helper lấy tên Actor thực hiện ghi nhận vào Nhật ký Audit
-  function getActorName() {
-    if (state.currentPersona === 'super_admin') {
-      return 'Vũ Minh Tuấn (Super Admin)';
-    } else {
-      return 'Lê Hoàng Nam (Admin Chi nhánh HCM-01)';
-    }
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\"/g, '&quot;');
-  }
-
-  function getInitials(name) {
-    if (!name) return 'NV';
-    const parts = name.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-
-  // =========================================================================
-  // 11. KHỞI TẠO ỨNG DỤNG & GLOBAL LISTENERS
-  // =========================================================================
-
-  document.addEventListener('DOMContentLoaded', () => {
-    // Đảm bảo tab mặc định khi vừa mở web luôn là Tổng quan (Overview)
-    state.activeView = 'overview';
-
-    // Navigation router listeners (hỗ trợ cả selector generic lẫn id cụ thể)
-    document.querySelectorAll('.sidebar-nav .nav-link, .sidebar-secondary .nav-link').forEach(link => {
-      link.addEventListener('click', () => {
-        const view = link.getAttribute('data-view');
-        if (view === 'overview') {
-          state.activeView = 'overview';
-        } else if (view === 'quota' || view === 'employees_accounts') {
-          state.activeView = 'quota';
-        } else if (view === 'quota_allocation') {
-          state.activeView = 'quota_allocation';
-        } else if (view === 'audit_log') {
-          state.activeView = 'audit_log';
-        }
-        saveState();
-        renderApp();
-      });
-    });
-
-    const navOverview = document.getElementById('nav-overview');
-    if (navOverview) {
-      navOverview.addEventListener('click', () => {
-        state.activeView = 'overview';
-        saveState();
-        renderApp();
-      });
-    }
-
-    const navEmpAcc = document.getElementById('nav-employees-accounts');
-    if (navEmpAcc) {
-      navEmpAcc.addEventListener('click', () => {
-        state.activeView = 'quota';
-        saveState();
-        renderApp();
-      });
-    }
-
-    const navQuota = document.getElementById('nav-quota');
-    if (navQuota) {
-      navQuota.addEventListener('click', () => {
-        state.activeView = 'quota';
-        saveState();
-        renderApp();
-      });
-    }
-
-    const navQuotaAlloc = document.getElementById('nav-quota-allocation');
-    if (navQuotaAlloc) {
-      navQuotaAlloc.addEventListener('click', () => {
-        state.activeView = 'quota_allocation';
-        saveState();
-        renderApp();
-      });
-    }
-
-    const navAudit = document.getElementById('nav-audit-log');
-    if (navAudit) {
-      navAudit.addEventListener('click', () => {
-        state.activeView = 'audit_log';
-        saveState();
-        renderApp();
-      });
-    }
-
-    const personaBtn = document.getElementById('btn-persona-switch');
-    if (personaBtn) {
-      personaBtn.addEventListener('click', togglePersona);
-    }
-    const userWidget = document.getElementById('user-profile-widget');
-    if (userWidget) {
-      userWidget.style.cursor = 'pointer';
-      userWidget.addEventListener('click', togglePersona);
-    }
-
-    const exportBtn = document.getElementById('btn-export-quota');
-    if (exportBtn) {
-      exportBtn.addEventListener('click', exportQuotaCSV);
-    }
-
-    const topAssign = document.getElementById('btn-top-assign-account');
-    if (topAssign) {
-      topAssign.addEventListener('click', () => {
-        state.activeView = 'quota';
-        saveState();
-        renderApp();
-        setTimeout(() => openAssignModal(), 50);
-      });
-    }
-
-    const globalSearch = document.getElementById('global-search-input');
-    if (globalSearch) {
-      globalSearch.addEventListener('input', (e) => {
-        const val = e.target.value;
-        if (state.activeView === 'overview') {
-          state.overviewFilters.search = val;
-        } else if (state.activeView === 'quota') {
-          state.quotaFilters.search = val;
-        } else if (state.activeView === 'audit_log') {
-          state.auditFilters.search = val;
-        }
-        renderApp();
-      });
-    }
-
-    const helpBtn = document.getElementById('btn-help-modal');
-    if (helpBtn) {
-      helpBtn.addEventListener('click', () => {
-        openModal({
-          title: 'Quy Chuẩn Quản Trị Quota Z-Enterprise',
-          content: `
-            <div class="impact-box mb-12">
-              <strong>1 Quota = 1 Tài khoản Zalo Enterprise</strong><br/>
-              Mỗi tài khoản cấp cho nhân sự tiêu tốn đúng 1 điểm Quota.
-            </div>
-            <div class="impact-box mb-12">
-              <strong>Phương trình Quota bất biến:</strong><br/>
-              <code>Tổng Quota = Đang sử dụng + Chưa sử dụng</code><br/>
-              <code>Đang sử dụng = Đang hoạt động + Tạm khóa</code>
-            </div>
-            <div class="impact-box mb-12">
-              <strong>Bảo tồn Leads khách hàng:</strong><br/>
-              Khi nhân sự thôi việc hoặc bàn giao, account được chuyển vào Kho thu hồi cùng toàn bộ danh bạ/leads để ưu tiên tái cấp cho nhân sự mới.
-            </div>
-            <div class="impact-box">
-              <strong>Quy tắc An toàn Bàn giao:</strong><br/>
-              Không cho phép bàn giao trực tiếp từ trạng thái Tạm khóa. Bắt buộc Mở khóa trước để xác nhận ủy quyền.
-            </div>
-          `,
-          confirmText: 'Đã hiểu quy chuẩn',
-          confirmClass: 'btn-primary',
-          onConfirm: () => closeModal()
+  const metrics = getMetrics();
+  document.getElementById('qm-central-available').innerText = metrics.centralPool;
+  document.getElementById('qm-total-allocated').innerText = metrics.allocated;
+
+  const regFilter = document.getElementById('qm-region-filter');
+  if (regFilter) regFilter.value = selectedRegion;
+
+  // filterQuotaManageTable automatically scopes both table and add-branch dropdown
+  filterQuotaManageTable(selectedRegion);
+
+  document.getElementById('modal-quota-manage').classList.remove('hidden');
+}
+
+function filterQuotaManageTable(regionFilter) {
+  const tbody = document.getElementById('qm-branches-tbody');
+  tbody.innerHTML = '';
+
+  const metrics = getMetrics();
+  let branchesToShow = [];
+
+  AppState.regions.forEach(r => {
+    if (regionFilter === 'all' || r.name === regionFilter) {
+      r.branches.forEach(b => {
+        const bAccounts = AppState.accounts.filter(a => a.branch === b.name);
+        const bQuota = bAccounts.length;
+        const bAssigned = bAccounts.filter(a => a.ownerName !== null).length;
+        const bUnassigned = bQuota - bAssigned;
+
+        branchesToShow.push({
+          branchName: b.name,
+          regionName: r.name,
+          quota: bQuota,
+          assigned: bAssigned,
+          unassigned: bUnassigned
         });
       });
     }
-
-    const notifBtn = document.getElementById('btn-notifications');
-    if (notifBtn) {
-      notifBtn.addEventListener('click', () => {
-        const summary = getSystemSummary();
-        openModal({
-          title: 'Thông Báo Cảnh Báo Rủi Ro Vận Hành',
-          content: `
-            <div class="impact-box mb-12" style="border-left: 4px solid var(--color-orange);">
-              <strong>Tổng số cảnh báo cần xử lý:</strong> ${summary.attention} trường hợp vi phạm quy tắc an toàn.
-            </div>
-            <ul style="padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--text-secondary);">
-              <li><strong>Nhân sự đã nghỉ việc nhưng account còn mở:</strong> Cần bàn giao hoặc thu hồi ngay để tránh thất thoát danh bạ.</li>
-              <li><strong>Tài khoản không phát sinh trao đổi > 30 ngày:</strong> Cần rà soát để tái điều tiết Quota cho nhân viên có nhu cầu.</li>
-              <li><strong>Tài khoản tạm khóa kéo dài:</strong> Cần xử lý dứt điểm hoặc thu hồi về quỹ chi nhánh.</li>
-            </ul>
-          `,
-          confirmText: 'Xem danh sách Cần chú ý',
-          confirmClass: 'btn-primary',
-          onConfirm: () => {
-            closeModal();
-            state.activeView = 'quota';
-            state.quotaFilters.activeTab = 'ATTENTION';
-            saveState();
-            renderApp();
-          }
-        });
-      });
-    }
-
-    setupBulkActionListeners();
-    renderApp();
   });
 
-})();
+  // Always synchronize the add-branch dropdown with current region filter
+  populateAddBranchDropdown(regionFilter);
+
+  // Update Section Title dynamically
+  const titleEl = document.getElementById('qm-add-branch-title');
+  if (titleEl) {
+    titleEl.innerHTML = regionFilter !== 'all'
+      ? `<span class="material-symbols-outlined text-[16px]">add_circle</span> Cấp Quota cho Chi nhánh mới thuộc <strong>${regionFilter}</strong>:`
+      : `<span class="material-symbols-outlined text-[16px]">add_circle</span> Cấp Quota cho Chi nhánh mới (Toàn quốc):`;
+  }
+
+  if (branchesToShow.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-400 italic">Không có chi nhánh phù hợp</td></tr>`;
+    return;
+  }
+
+  branchesToShow.forEach(item => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-slate-50/80 transition-colors';
+
+    const canReclaim = item.unassigned > 0;
+    const canAllocate = metrics.centralPool > 0;
+
+    tr.innerHTML = `
+      <td class="py-2.5 px-3 font-semibold text-on-surface">${item.branchName}</td>
+      <td class="py-2.5 px-3 text-slate-500">${item.regionName}</td>
+      <td class="py-2.5 px-3 text-center font-bold text-primary">${item.quota}</td>
+      <td class="py-2.5 px-3 text-center text-emerald-700 font-semibold">${item.assigned}</td>
+      <td class="py-2.5 px-3 text-center text-amber-700 font-semibold">${item.unassigned}</td>
+      <td class="py-2.5 px-3 text-center">
+        <div class="inline-flex items-center gap-1.5 justify-center">
+          <button class="px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-0.5 transition-all ${canReclaim ? 'border-red-300 text-red-700 hover:bg-red-50 cursor-pointer active:scale-95' : 'border-slate-200 text-slate-300 cursor-not-allowed opacity-50'}" ${!canReclaim ? 'disabled title="Không có quota chưa gán để thu hồi"' : ''} onclick="quickReclaimBranchQuota('${item.branchName}')">
+            <span class="material-symbols-outlined text-[12px]">remove</span> Thu hồi
+          </button>
+          <button class="px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center gap-0.5 transition-all ${canAllocate ? 'border-emerald-300 text-emerald-700 hover:bg-emerald-50 cursor-pointer active:scale-95' : 'border-slate-200 text-slate-300 cursor-not-allowed opacity-50'}" ${!canAllocate ? 'disabled title="Kho trung tâm đã hết quota khả dụng"' : ''} onclick="quickAllocateBranchQuota('${item.branchName}')">
+            <span class="material-symbols-outlined text-[12px]">add</span> Cấp thêm
+          </button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function populateAddBranchDropdown(selectedRegion = 'all') {
+  const addSel = document.getElementById('qm-add-branch-select');
+  if (!addSel) return;
+  addSel.innerHTML = '';
+
+  // Lấy danh sách các chi nhánh hiện đã có tài khoản (quota > 0)
+  const activeBranchNames = new Set(
+    AppState.accounts.filter(a => a.branch !== 'Kho trung tâm').map(a => a.branch)
+  );
+
+  // CHỈ nạp các chi nhánh chưa có quota nào (quota === 0)
+  let zeroQuotaBranches = AppState.expansionBranches.filter(b => !activeBranchNames.has(b.name));
+  if (selectedRegion && selectedRegion !== 'all') {
+    zeroQuotaBranches = zeroQuotaBranches.filter(b => b.region === selectedRegion);
+  }
+
+  if (zeroQuotaBranches.length === 0) {
+    const msg = selectedRegion && selectedRegion !== 'all'
+      ? `-- Không còn chi nhánh chưa có Quota thuộc ${selectedRegion} --`
+      : '-- Tất cả chi nhánh đều đã có Quota --';
+    addSel.innerHTML = `<option value="">${msg}</option>`;
+    return;
+  }
+
+  // Khi chọn 'all': Nhóm chi nhánh theo từng Vùng qua <optgroup> để rõ ràng
+  if (!selectedRegion || selectedRegion === 'all') {
+    const grouped = {};
+    zeroQuotaBranches.forEach(b => {
+      if (!grouped[b.region]) grouped[b.region] = [];
+      grouped[b.region].push(b);
+    });
+    Object.keys(grouped).forEach(regName => {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = `── ${regName} ──`;
+      grouped[regName].forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.name;
+        opt.setAttribute('data-region', b.region);
+        opt.innerText = `${b.name} - Chưa có quota (0)`;
+        optgroup.appendChild(opt);
+      });
+      addSel.appendChild(optgroup);
+    });
+  } else {
+    // Khi chọn 1 vùng cụ thể: chỉ hiện danh sách chi nhánh của vùng đó
+    zeroQuotaBranches.forEach(b => {
+      addSel.innerHTML += `<option value="${b.name}" data-region="${b.region}">${b.name} - Chưa có quota (0)</option>`;
+    });
+  }
+}
+
+function quickAllocateBranchQuota(branchName) {
+  const metrics = getMetrics();
+  if (metrics.centralPool <= 0) {
+    alert('Kho trung tâm đã hết hạn ngạch (0 quota khả dụng)! Không thể cấp thêm.');
+    return;
+  }
+
+  // Find 1 unassigned account in Kho trung tâm
+  const acc = AppState.accounts.find(a => a.branch === 'Kho trung tâm' && a.ownerName === null);
+  if (!acc) return;
+
+  const reg = AppState.regions.find(r => r.branches.some(b => b.name === branchName));
+  acc.branch = branchName;
+  acc.region = reg ? reg.name : 'Vùng 1 - Hà Nội';
+
+  addAuditLog('Cấp Quota', branchName, `Cấp thêm 1 quota từ Kho trung tâm cho ${branchName}`);
+  recalculateRegionCounts();
+
+  // Refresh UI
+  const curRegFilter = document.getElementById('qm-region-filter').value;
+  filterQuotaManageTable(curRegFilter);
+  populateAddBranchDropdown();
+  document.getElementById('qm-central-available').innerText = getMetrics().centralPool;
+  document.getElementById('qm-total-allocated').innerText = getMetrics().allocated;
+  renderQuotas();
+  renderOverview();
+  renderAccounts();
+}
+
+function quickReclaimBranchQuota(branchName) {
+  // Find 1 unassigned account in this branch
+  const acc = AppState.accounts.find(a => a.branch === branchName && a.ownerName === null);
+  if (!acc) {
+    alert(`Chi nhánh ${branchName} không còn tài khoản chưa gán nào để thu hồi! Để thu hồi tài khoản đang có người dùng, vui lòng thực hiện từ danh sách Quản trị tài khoản.`);
+    return;
+  }
+
+  acc.branch = 'Kho trung tâm';
+  acc.region = 'Toàn quốc';
+  acc.isReclaimed = true;
+
+  addAuditLog('Thu hồi Quota', branchName, `Thu hồi 1 quota chưa gán của ${branchName} về Kho trung tâm`);
+  recalculateRegionCounts();
+
+  // Refresh UI
+  const curRegFilter = document.getElementById('qm-region-filter').value;
+  filterQuotaManageTable(curRegFilter);
+  populateAddBranchDropdown();
+  document.getElementById('qm-central-available').innerText = getMetrics().centralPool;
+  document.getElementById('qm-total-allocated').innerText = getMetrics().allocated;
+  renderQuotas();
+  renderOverview();
+  renderAccounts();
+}
+
+function addNewBranchQuota() {
+  const addSel = document.getElementById('qm-add-branch-select');
+  const branchName = addSel.value;
+  const count = parseInt(document.getElementById('qm-add-branch-amount').value, 10);
+  const metrics = getMetrics();
+
+  if (!branchName) {
+    alert('Vui lòng chọn chi nhánh cần cấp quota!');
+    return;
+  }
+
+  if (isNaN(count) || count <= 0) {
+    alert('Vui lòng nhập số lượng quota hợp lệ (tối thiểu 1)!');
+    return;
+  }
+
+  if (count > metrics.centralPool) {
+    alert(`Kho trung tâm chỉ còn ${metrics.centralPool} quota khả dụng! Không thể cấp vượt quá.`);
+    return;
+  }
+
+  // Xác định Vùng của chi nhánh này
+  let regName = 'Vùng 1 - Hà Nội';
+  const expBranch = AppState.expansionBranches.find(b => b.name === branchName);
+  if (expBranch) {
+    regName = expBranch.region;
+  } else {
+    const r = AppState.regions.find(r => r.branches.some(b => b.name === branchName));
+    if (r) regName = r.name;
+  }
+
+  // Đảm bảo chi nhánh có mặt trong AppState.regions
+  const targetRegion = AppState.regions.find(r => r.name === regName);
+  if (targetRegion) {
+    let targetBranch = targetRegion.branches.find(b => b.name === branchName);
+    if (!targetBranch) {
+      targetBranch = {
+        id: `B${targetRegion.id.replace('V', '')}${String(targetRegion.branches.length + 1).padStart(2, '0')}`,
+        name: branchName,
+        quota: count,
+        assigned: 0,
+        unassigned: count
+      };
+      targetRegion.branches.push(targetBranch);
+    }
+  }
+
+  const poolAccounts = AppState.accounts.filter(a => a.branch === 'Kho trung tâm').slice(0, count);
+
+  poolAccounts.forEach(acc => {
+    acc.branch = branchName;
+    acc.region = regName;
+    acc.isReclaimed = false;
+  });
+
+  addAuditLog('Cấp Quota Mới', branchName, `Cấp mới ${count} quota từ Kho trung tâm cho ${branchName} (${regName})`);
+  recalculateRegionCounts();
+
+  // Refresh
+  const curRegFilter = document.getElementById('qm-region-filter').value;
+  filterQuotaManageTable(curRegFilter);
+  populateAddBranchDropdown();
+  document.getElementById('qm-central-available').innerText = getMetrics().centralPool;
+  document.getElementById('qm-total-allocated').innerText = getMetrics().allocated;
+  renderQuotas();
+  renderOverview();
+  renderAccounts();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── Missing Functions for Quota and Audit Views ──
+
+function toggleRegionBranches(regionId) {
+  const list = document.getElementById(`branch-list-${regionId}`);
+  const arrow = document.getElementById(`branch-arrow-${regionId}`);
+  if (list && arrow) {
+    if (list.classList.contains('hidden')) {
+      list.classList.remove('hidden');
+      arrow.classList.add('rotate-180');
+    } else {
+      list.classList.add('hidden');
+      arrow.classList.remove('rotate-180');
+    }
+  }
+}
+
+function jumpToBranchAccounts(regionName, branchName) {
+  // Update filters in state
+  AppState.accountFilters.region = regionName;
+  AppState.accountFilters.branch = branchName;
+  AppState.accountFilters.status = 'all';
+  
+  // Update UI Selectors in Account Tab
+  const regionSel = document.getElementById('acc-filter-region');
+  const branchSel = document.getElementById('acc-filter-branch');
+  
+  if (regionSel) {
+    regionSel.value = regionName;
+    // Dispatch change to populate branch options
+    regionSel.dispatchEvent(new Event('change'));
+  }
+  
+  if (branchSel) {
+    branchSel.value = branchName;
+  }
+  
+  // Switch to Accounts view
+  switchView('accounts');
+}
+
+function renderAudit() {
+  const tbody = document.getElementById('audit-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  
+  // Sort logs by time desc
+  const sortedLogs = [...AppState.auditLogs].sort((a, b) => new Date(b.time) - new Date(a.time));
+
+  if (sortedLogs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-400 italic">Chưa có nhật ký hoạt động nào.</td></tr>`;
+    return;
+  }
+
+  sortedLogs.forEach(log => {
+    let actionStyle = 'text-slate-700 bg-slate-100';
+    if (log.action.includes('Gán') || log.action.includes('Mở') || log.action.includes('Cấp')) actionStyle = 'text-emerald-700 bg-emerald-100';
+    else if (log.action.includes('Khóa') || log.action.includes('Thu hồi')) actionStyle = 'text-amber-700 bg-amber-100';
+    else if (log.action.includes('Bàn giao')) actionStyle = 'text-sky-700 bg-sky-100';
+    
+    tbody.innerHTML += `
+      <tr class="border-b border-outline-variant/30 text-xs text-on-surface hover:bg-slate-50 transition-colors">
+        <td class="py-2.5 px-3 font-mono text-slate-500 whitespace-nowrap">${log.time}</td>
+        <td class="py-2.5 px-3 font-medium">${log.actor}</td>
+        <td class="py-2.5 px-3">
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold ${actionStyle}">${log.action}</span>
+        </td>
+        <td class="py-2.5 px-3 font-mono text-primary font-medium">${log.target}</td>
+        <td class="py-2.5 px-3 text-slate-600 max-w-md truncate" title="${log.detail}">${log.detail}</td>
+      </tr>
+    `;
+  });
+}
+
+// APP INITIALIZATION & DEFAULT LANDING (CR-001)
+// ─────────────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  initAccountsData();
+  recalculateRegionCounts();
+
+  // Search input: press Enter to apply filters
+  const searchInput = document.getElementById('acc-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        applyAccountFilters();
+      }
+    });
+  }
+
+  // Region filter: populate dependent branch dropdown only (requires clicking "Áp dụng" to filter table)
+  const regionSel = document.getElementById('acc-filter-region');
+  if (regionSel) {
+    regionSel.addEventListener('change', (e) => {
+      const branchSel = document.getElementById('acc-filter-branch');
+      if (branchSel) {
+        branchSel.innerHTML = '<option value="all">Tất cả chi nhánh</option>';
+        if (e.target.value !== 'all') {
+          const reg = AppState.regions.find(r => r.name === e.target.value);
+          if (reg) {
+            reg.branches.forEach(b => {
+              branchSel.innerHTML += `<option value="${b.name}">${b.name}</option>`;
+            });
+          }
+        }
+      }
+    });
+  }
+
+  // Tab buttons click listeners
+  document.querySelectorAll('.acc-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      AppState.accountFilters.status = btn.getAttribute('data-filter');
+      renderAccounts();
+    });
+  });
+
+  // CR-001: Default landing page is Account Management ('accounts')
+  switchView('accounts');
+});
