@@ -634,6 +634,7 @@ function switchView(viewName) {
   else if (viewName === 'accounts') renderAccounts();
   else if (viewName === 'quotas') renderQuotas();
   else if (viewName === 'audit') renderAudit();
+  else if (viewName === 'chat-monitor') renderChatMonitor();
 }
 
 // Render Overview View (Redirects to Quotas & Accounts after merging views)
@@ -709,45 +710,7 @@ function renderAccounts() {
   const kpiLocked = document.getElementById('acc-kpi-locked');
   if (kpiLocked) kpiLocked.innerText = metrics.locked;
 
-  // 1b. Update Gauge Bar (Visual Usage Ratio - 100% Khớp Tabs)
-  const gaugeRatio = document.getElementById('acc-gauge-ratio');
-  if (gaugeRatio) {
-    gaugeRatio.innerText = isBranchAdmin ? metrics.total + ' tài khoản chi nhánh' : metrics.total + ' tài khoản hệ thống';
-  }
-  const gaugePercent = document.getElementById('acc-gauge-percent');
-  if (gaugePercent) gaugePercent.innerText = '100%';
-
-  const barActive = document.getElementById('acc-gauge-bar-active');
-  const barPending = document.getElementById('acc-gauge-bar-pending');
-  const barLocked = document.getElementById('acc-gauge-bar-locked');
-  const barEmpty = document.getElementById('acc-gauge-bar-empty');
-
-  const activeCount = metrics.active;
-  const pendingCount = metrics.pending;
-  const lockedCount = metrics.locked;
-  const emptyCount = isBranchAdmin ? metrics.unassigned : (metrics.unassignedInBranch + metrics.centralPool);
-
-  if (barActive) barActive.style.width = (activeCount / totalCount) * 100 + '%';
-  if (barPending) barPending.style.width = (pendingCount / totalCount) * 100 + '%';
-  if (barLocked) barLocked.style.width = (lockedCount / totalCount) * 100 + '%';
-  if (barEmpty) barEmpty.style.width = (emptyCount / totalCount) * 100 + '%';
-
-  // Update Sublegend
-  const subActive = document.getElementById('acc-sublegend-active');
-  if (subActive) subActive.innerText = activeCount;
-  const subPending = document.getElementById('acc-sublegend-pending');
-  if (subPending) subPending.innerText = pendingCount;
-  const subLocked = document.getElementById('acc-sublegend-locked');
-  if (subLocked) subLocked.innerText = lockedCount;
-  const subEmpty = document.getElementById('acc-sublegend-empty');
-  if (subEmpty) subEmpty.innerText = emptyCount;
-
-  const subTotal = document.getElementById('acc-sublegend-total');
-  if (subTotal) {
-    subTotal.innerText = isBranchAdmin ? `Tổng: ${metrics.total}` : 'Tổng: 100';
-  }
-
-  // 1c. Update Top Right Attention Notification List (Scoped by Role)
+  // 1b. Update Top Right Attention Notification List (Scoped by Role)
   const attentionAccounts = isBranchAdmin
     ? AppState.accounts.filter(a => a.branch === AppState.activeBranchScope && a.attention !== null)
     : AppState.accounts.filter(a => a.attention !== null);
@@ -888,7 +851,8 @@ function renderAccounts() {
   // Render Table Rows
   const tbody = document.getElementById('accounts-table-body');
   tbody.innerHTML = '';
-  document.getElementById('acc-visible-count').innerText = `${filtered.length} tài khoản`;
+  const countEl = document.getElementById('acc-visible-count');
+  if (countEl) countEl.innerText = `${filtered.length} tài khoản`;
 
   if (filtered.length === 0) {
     tbody.innerHTML = `
@@ -1433,37 +1397,28 @@ function updateDrawerActionBar(acc) {
     return;
   }
 
-  // Case 3: ACTIVE Account (Full actions)
+  // Case 3: ACTIVE Account (Full 4 actions directly visible)
   if (acc.status === 'ACTIVE') {
     container.innerHTML = `
-      <button class="flex-1 h-9 px-2 bg-surface-container-high text-primary hover:bg-surface-container-highest border border-primary/20 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openHandoverModal('${acc.id}')" title="Bàn giao tài khoản trực tiếp cho nhân viên khác">
+      <button class="flex-1 h-9 px-2 bg-surface-container-high text-primary hover:bg-surface-container-highest border border-primary/20 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95" onclick="openHandoverModal('${acc.id}')" title="Bàn giao tài khoản trực tiếp cho nhân viên cùng chi nhánh">
         <span class="material-symbols-outlined text-[15px]">sync_alt</span>
         <span>Bàn giao</span>
       </button>
 
-      <button class="h-9 px-2 bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openLockModal('${acc.id}', true)">
+      <button class="h-9 px-2.5 bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95" onclick="openLockModal('${acc.id}', true)" title="Tạm khóa tài khoản">
         <span class="material-symbols-outlined text-[15px]">lock</span>
         <span>Tạm khóa</span>
       </button>
 
-      <button class="h-9 px-2 bg-red-50 text-red-700 hover:bg-red-100 border border-red-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openReclaimModal('${acc.id}')">
+      <button class="h-9 px-2.5 bg-red-50 text-red-700 hover:bg-red-100 border border-red-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95" onclick="openReclaimModal('${acc.id}')" title="Thu hồi tài khoản về Kho trung tâm">
         <span class="material-symbols-outlined text-[15px]">undo</span>
         <span>Thu hồi</span>
       </button>
 
-      ${isSuper ? `
-        <div class="relative">
-          <button class="w-9 h-9 flex items-center justify-center rounded border border-outline-variant hover:bg-surface-container-high text-on-surface-variant cursor-pointer" onclick="toggleDropdown('dw-more-actions')">
-            <span class="material-symbols-outlined text-[18px]">more_vert</span>
-          </button>
-          <div id="dw-more-actions" class="hidden absolute bottom-11 right-0 w-36 bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 z-30">
-            <button class="w-full px-3 py-1.5 text-left text-xs hover:bg-surface-container-high flex items-center gap-1.5 cursor-pointer text-on-surface" onclick="openResetPasswordModal('${acc.id}')">
-              <span class="material-symbols-outlined text-[14px]">password</span>
-              <span>Reset mật khẩu</span>
-            </button>
-          </div>
-        </div>
-      ` : ''}
+      <button class="h-9 px-2.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95" onclick="openResetPasswordModal('${acc.id}')" title="Reset thông tin đăng nhập / Đặt lại mật khẩu">
+        <span class="material-symbols-outlined text-[15px]">password</span>
+        <span>Đặt lại MK</span>
+      </button>
     `;
     return;
   }
@@ -1471,14 +1426,19 @@ function updateDrawerActionBar(acc) {
   // Case 4: LOCKED Account
   if (acc.status === 'LOCKED') {
     container.innerHTML = `
-      <button class="flex-1 h-9 px-3 bg-emerald-600 text-white hover:bg-emerald-700 rounded font-medium text-xs flex items-center justify-center gap-1.5 cursor-pointer" onclick="openLockModal('${acc.id}', false)">
+      <button class="flex-1 h-9 px-3 bg-emerald-600 text-white hover:bg-emerald-700 rounded font-medium text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95" onclick="openLockModal('${acc.id}', false)">
         <span class="material-symbols-outlined text-[16px]">lock_open</span>
         <span>Mở khóa tài khoản</span>
       </button>
 
-      <button class="h-9 px-3 bg-red-50 text-red-700 hover:bg-red-100 border border-red-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer" onclick="openReclaimModal('${acc.id}')">
+      <button class="h-9 px-3 bg-red-50 text-red-700 hover:bg-red-100 border border-red-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95" onclick="openReclaimModal('${acc.id}')" title="Thu hồi tài khoản về Kho trung tâm">
         <span class="material-symbols-outlined text-[15px]">undo</span>
         <span>Thu hồi</span>
+      </button>
+
+      <button class="h-9 px-3 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 rounded font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95" onclick="openResetPasswordModal('${acc.id}')" title="Reset thông tin đăng nhập / Đặt lại mật khẩu">
+        <span class="material-symbols-outlined text-[15px]">password</span>
+        <span>Đặt lại MK</span>
       </button>
     `;
     return;
@@ -1600,11 +1560,23 @@ function openAssignAccountModal(accountId = null) {
   const readonlyWrapAcc = document.getElementById('modal-provision-acc-readonly-wrap');
   const selectWrapAcc = document.getElementById('modal-provision-acc-select-wrap');
   const accSelect = document.getElementById('modal-provision-acc-select');
+  const empInput = document.getElementById('modal-provision-emp-input');
+  const dispInput = document.getElementById('modal-provision-display-name');
 
   if (accountId) {
     targetAccount = AppState.accounts.find(a => a.id === accountId);
     if (readonlyWrapAcc) readonlyWrapAcc.classList.remove('hidden');
     if (selectWrapAcc) selectWrapAcc.classList.add('hidden');
+
+    // Enable fields since account is known
+    if (empInput) {
+      empInput.disabled = false;
+      empInput.className = 'w-full text-xs pl-8 pr-8 py-2 rounded-lg border border-outline-variant bg-white focus:outline-primary focus:border-primary font-medium';
+    }
+    if (dispInput) {
+      dispInput.disabled = false;
+      dispInput.className = 'w-full text-xs p-2 rounded-lg border border-outline-variant bg-white text-on-surface font-medium focus:outline-primary focus:border-primary';
+    }
   } else {
     if (availableAccounts.length === 0) {
       alert('Không còn tài khoản khả dụng để gán! Vui lòng thu hồi tài khoản không dùng trước.');
@@ -1627,6 +1599,16 @@ function openAssignAccountModal(accountId = null) {
         accSelect.appendChild(opt);
       });
       accSelect.value = '';
+    }
+
+    // Disable email and display name fields until Account ID is selected
+    if (empInput) {
+      empInput.disabled = true;
+      empInput.className = 'w-full text-xs pl-8 pr-8 py-2 rounded-lg border border-slate-200 bg-slate-100 text-slate-400 font-medium cursor-not-allowed focus:outline-primary focus:border-primary';
+    }
+    if (dispInput) {
+      dispInput.disabled = true;
+      dispInput.className = 'w-full text-xs p-2 rounded-lg border border-slate-200 bg-slate-100 text-slate-400 font-medium cursor-not-allowed focus:outline-primary focus:border-primary';
     }
   }
 
@@ -1656,16 +1638,45 @@ function openAssignAccountModal(accountId = null) {
 
   // Reset Combobox & Display Name
   clearProvisionCombobox();
-  document.getElementById('modal-provision-display-name').value = '';
+  if (dispInput) dispInput.value = '';
 
   document.getElementById('modal-top-provision').classList.remove('hidden');
 }
 
 function onProvisionAccChanged(accId) {
-  const target = AppState.accounts.find(a => a.id === accId);
-  gTargetAssignAccount = target || null;
+  const empInput = document.getElementById('modal-provision-emp-input');
+  const dispInput = document.getElementById('modal-provision-display-name');
+
+  if (accId) {
+    const target = AppState.accounts.find(a => a.id === accId);
+    gTargetAssignAccount = target || null;
+    
+    // Enable fields
+    if (empInput) {
+      empInput.disabled = false;
+      empInput.className = 'w-full text-xs pl-8 pr-8 py-2 rounded-lg border border-outline-variant bg-white focus:outline-primary focus:border-primary font-medium';
+    }
+    if (dispInput) {
+      dispInput.disabled = false;
+      dispInput.className = 'w-full text-xs p-2 rounded-lg border border-outline-variant bg-white text-on-surface font-medium focus:outline-primary focus:border-primary';
+    }
+  } else {
+    gTargetAssignAccount = null;
+
+    // Disable fields
+    if (empInput) {
+      empInput.disabled = true;
+      empInput.className = 'w-full text-xs pl-8 pr-8 py-2 rounded-lg border border-slate-200 bg-slate-100 text-slate-400 font-medium cursor-not-allowed focus:outline-primary focus:border-primary';
+    }
+    if (dispInput) {
+      dispInput.disabled = true;
+      dispInput.className = 'w-full text-xs p-2 rounded-lg border border-slate-200 bg-slate-100 text-slate-400 font-medium cursor-not-allowed focus:outline-primary focus:border-primary';
+    }
+  }
+
   renderProvisionBranchUI();
   clearProvisionCombobox();
+  if (dispInput) dispInput.value = '';
   
   // Set Account ID in header (for readonly mode)
   const accIdEl = document.getElementById('modal-provision-acc-id');
@@ -1747,12 +1758,14 @@ function onProvisionBranchChanged(branchName) {
 
 // ── Searchable Combobox Logic ──
 function openProvisionCombobox() {
+  if (!gTargetAssignAccount) return;
   renderProvisionComboboxList('');
   const dropdown = document.getElementById('modal-provision-emp-dropdown');
   if (dropdown) dropdown.classList.remove('hidden');
 }
 
 function onProvisionComboboxInput(keyword) {
+  if (!gTargetAssignAccount) return;
   const clearBtn = document.getElementById('modal-provision-emp-clear');
   if (clearBtn) {
     if (keyword.length > 0) clearBtn.classList.remove('hidden');
@@ -1847,9 +1860,9 @@ function selectProvisionEmployee(emp) {
   document.getElementById('modal-provision-selected-email').value = emp.email;
   document.getElementById('modal-provision-selected-dept').value = emp.dept || 'Kinh doanh Khách hàng';
 
-  // Auto-fill Display Name
+  // Auto-fill Display Name if empty
   const dispNameInput = document.getElementById('modal-provision-display-name');
-  if (dispNameInput) dispNameInput.value = emp.name;
+  if (dispNameInput && !dispNameInput.value) dispNameInput.value = emp.name;
 
   const clearBtn = document.getElementById('modal-provision-emp-clear');
   if (clearBtn) clearBtn.classList.remove('hidden');
@@ -1868,20 +1881,26 @@ document.addEventListener('click', (e) => {
 });
 
 function submitTopProvision() {
+  const targetAccount = gTargetAssignAccount;
+  if (!targetAccount) {
+    alert('Vui lòng chọn một Account ID cần cấp!');
+    return;
+  }
+
   const name = document.getElementById('modal-provision-selected-name').value;
   const email = document.getElementById('modal-provision-selected-email').value;
   const code = document.getElementById('modal-provision-selected-code').value;
   const dept = document.getElementById('modal-provision-selected-dept').value || 'Kinh doanh Khách hàng';
-  const displayName = document.getElementById('modal-provision-display-name').value.trim() || name;
+  const displayName = document.getElementById('modal-provision-display-name').value.trim();
 
   if (!name || !email) {
     alert('Vui lòng chọn một nhân viên từ danh sách gợi ý!');
     return;
   }
 
-  const targetAccount = gTargetAssignAccount;
-  if (!targetAccount) {
-    alert('Không tìm thấy thông tin tài khoản cần gán!');
+  if (!displayName) {
+    alert('Vui lòng nhập Tên hiển thị trên Zalo (bắt buộc)!');
+    document.getElementById('modal-provision-display-name').focus();
     return;
   }
 
@@ -1943,63 +1962,173 @@ function submitTopProvision() {
 }
 
 
-// 2. Handover Account
+// 2. Handover Account (Searchable Combobox strictly scoped to Same Branch)
+let gTargetHandoverAccount = null;
+
 function openHandoverModal(accountId) {
   const acc = AppState.accounts.find(a => a.id === accountId);
   if (!acc) return;
+  gTargetHandoverAccount = acc;
 
   document.getElementById('modal-handover-acc-id').innerText = acc.id;
   document.getElementById('modal-handover-current-owner').innerText = `${acc.ownerName} (${acc.ownerEmail})`;
   document.getElementById('modal-handover-branch').innerText = acc.branch;
 
-  // New employee select
-  const empSelect = document.getElementById('modal-handover-employee-select');
-  empSelect.innerHTML = '<option value="">-- Chọn nhân viên tiếp nhận --</option>';
-
-  AppState.hrEmployees.forEach(emp => {
-    const hasAccount = AppState.accounts.some(a => a.ownerEmail === emp.email);
-    if (!hasAccount && emp.email !== acc.ownerEmail) {
-      empSelect.innerHTML += `<option value="${emp.code}" data-name="${emp.name}" data-email="${emp.email}">${emp.name} (${emp.email}) - ${emp.branch}</option>`;
-    }
-  });
-
+  clearHandoverCombobox();
   document.getElementById('modal-handover').classList.remove('hidden');
 }
 
-function submitHandover() {
-  const accId = document.getElementById('modal-handover-acc-id').innerText;
-  const empSelect = document.getElementById('modal-handover-employee-select');
-  const selectedOpt = empSelect.selectedOptions[0];
+function openHandoverCombobox() {
+  renderHandoverComboboxList('');
+  const dropdown = document.getElementById('modal-handover-emp-dropdown');
+  if (dropdown) dropdown.classList.remove('hidden');
+}
 
-  if (!selectedOpt || !selectedOpt.value) {
-    alert('Vui lòng chọn nhân viên tiếp nhận!');
+function onHandoverComboboxInput(keyword) {
+  const clearBtn = document.getElementById('modal-handover-emp-clear');
+  if (clearBtn) {
+    if (keyword.length > 0) clearBtn.classList.remove('hidden');
+    else clearBtn.classList.add('hidden');
+  }
+
+  document.getElementById('modal-handover-selected-code').value = '';
+  document.getElementById('modal-handover-selected-name').value = '';
+  document.getElementById('modal-handover-selected-email').value = '';
+  document.getElementById('modal-handover-selected-dept').value = '';
+
+  renderHandoverComboboxList(keyword);
+  const dropdown = document.getElementById('modal-handover-emp-dropdown');
+  if (dropdown) dropdown.classList.remove('hidden');
+}
+
+function clearHandoverCombobox() {
+  const input = document.getElementById('modal-handover-emp-input');
+  if (input) input.value = '';
+  const clearBtn = document.getElementById('modal-handover-emp-clear');
+  if (clearBtn) clearBtn.classList.add('hidden');
+
+  document.getElementById('modal-handover-selected-code').value = '';
+  document.getElementById('modal-handover-selected-name').value = '';
+  document.getElementById('modal-handover-selected-email').value = '';
+  document.getElementById('modal-handover-selected-dept').value = '';
+
+  const dropdown = document.getElementById('modal-handover-emp-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+}
+
+function renderHandoverComboboxList(keyword = '') {
+  const dropdown = document.getElementById('modal-handover-emp-dropdown');
+  if (!dropdown || !gTargetHandoverAccount) return;
+  dropdown.innerHTML = '';
+
+  const branch = gTargetHandoverAccount.branch;
+  const kw = keyword.toLowerCase().trim();
+
+  const assignedEmails = new Set(
+    AppState.accounts.filter(a => a.ownerEmail && a.status !== 'UNASSIGNED').map(a => a.ownerEmail)
+  );
+
+  // STRICT RULE: Same branch only, active, has corporate email, no active account
+  const eligible = AppState.hrEmployees.filter(emp => {
+    if (emp.status !== 'ACTIVE') return false;
+    if (!emp.email || !emp.email.endsWith('@fpt.com')) return false;
+    if (emp.branch !== branch) return false;
+    if (assignedEmails.has(emp.email)) return false;
+    if (emp.email === gTargetHandoverAccount.ownerEmail) return false;
+    if (kw) {
+      const matchName = emp.name.toLowerCase().includes(kw);
+      const matchEmail = emp.email.toLowerCase().includes(kw);
+      const matchCode = emp.code.toLowerCase().includes(kw);
+      return matchName || matchEmail || matchCode;
+    }
+    return true;
+  });
+
+  if (eligible.length === 0) {
+    dropdown.innerHTML = `<div class="p-3 text-center text-slate-400 text-xs italic">Không tìm thấy nhân sự khả dụng tại ${branch}</div>`;
     return;
   }
 
-  const newName = selectedOpt.getAttribute('data-name');
-  const newEmail = selectedOpt.getAttribute('data-email');
+  eligible.forEach(emp => {
+    const item = document.createElement('div');
+    item.className = 'p-2.5 hover:bg-primary/5 cursor-pointer transition-colors';
+    item.onclick = () => selectHandoverEmployee(emp);
+    item.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="font-bold text-on-surface text-xs">${emp.name}</div>
+        <span class="text-[10px] font-mono text-slate-400">${emp.code}</span>
+      </div>
+      <div class="text-[11px] text-slate-500 font-mono mt-0.5">${emp.email} <span class="text-slate-300">•</span> ${emp.dept || 'Kinh doanh'} <span class="text-slate-300">•</span> <strong class="text-primary font-normal">${emp.branch}</strong></div>
+    `;
+    dropdown.appendChild(item);
+  });
+}
 
-  const acc = AppState.accounts.find(a => a.id === accId);
-  if (acc) {
-    const oldName = acc.ownerName;
-    acc.ownerName = newName;
-    acc.displayName = newName;
-    acc.username = newEmail.split('@')[0];
-    acc.ownerEmail = newEmail;
-    acc.assignedDate = '27/09/2026';
-    acc.history.unshift({
-      from: oldName,
-      to: newName,
-      date: '27/09/2026 10:00',
-      by: AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin chi nhánh'
-    });
+function selectHandoverEmployee(emp) {
+  const input = document.getElementById('modal-handover-emp-input');
+  if (input) input.value = `${emp.name} (${emp.email})`;
 
-    addAuditLog('Bàn giao tài khoản', acc.id, `Bàn giao từ ${oldName} sang ${newName} (${newEmail}), giữ nguyên dữ liệu và Account ID`);
+  document.getElementById('modal-handover-selected-code').value = emp.code;
+  document.getElementById('modal-handover-selected-name').value = emp.name;
+  document.getElementById('modal-handover-selected-email').value = emp.email;
+  document.getElementById('modal-handover-selected-dept').value = emp.dept || 'Kinh doanh';
+
+  const clearBtn = document.getElementById('modal-handover-emp-clear');
+  if (clearBtn) clearBtn.classList.remove('hidden');
+
+  const dropdown = document.getElementById('modal-handover-emp-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+}
+
+// Click outside listener for handover combobox
+document.addEventListener('click', (e) => {
+  const wrapper = document.getElementById('handover-combobox-wrapper');
+  const dropdown = document.getElementById('modal-handover-emp-dropdown');
+  if (wrapper && dropdown && !wrapper.contains(e.target)) {
+    dropdown.classList.add('hidden');
+  }
+});
+
+function submitHandover() {
+  const name = document.getElementById('modal-handover-selected-name').value;
+  const email = document.getElementById('modal-handover-selected-email').value;
+  const code = document.getElementById('modal-handover-selected-code').value;
+  const dept = document.getElementById('modal-handover-selected-dept').value || 'Kinh doanh';
+
+  if (!name || !email) {
+    alert('Vui lòng chọn nhân viên tiếp nhận từ danh sách gợi ý!');
+    return;
   }
 
+  const acc = gTargetHandoverAccount;
+  if (!acc) {
+    alert('Không tìm thấy thông tin tài khoản cần bàn giao!');
+    return;
+  }
+
+  const oldName = acc.ownerName;
+  const oldEmail = acc.ownerEmail;
+
+  acc.ownerName = name;
+  acc.displayName = name;
+  acc.username = email.split('@')[0];
+  acc.ownerEmail = email;
+  acc.empCode = code;
+  acc.empDept = dept;
+  acc.assignedDate = new Date().toLocaleDateString('vi-VN');
+  acc.history.unshift({
+    from: `${oldName} (${oldEmail})`,
+    to: `${name} (${email})`,
+    date: new Date().toLocaleString('vi-VN'),
+    by: AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin chi nhánh'
+  });
+
+  addAuditLog('Bàn giao tài khoản', acc.id, `Bàn giao từ ${oldName} sang ${name} (${email}) tại ${acc.branch}, giữ nguyên dữ liệu và Account ID`);
+
   closeModal('modal-handover');
-  openDrawer(accId);
+  openDrawer(acc.id);
   renderAccounts();
+  alert(`Bàn giao thành công tài khoản ${acc.id} cho nhân sự ${name} (${email}) thuộc ${acc.branch}!`);
 }
 
 // 3. Lock & Unlock
@@ -2379,16 +2508,11 @@ function renderQuotas() {
           </div>
         </div>
 
-        <!-- Col 3: Fixed 270px width (Total Quota, Adjust & Branch Actions) -->
-        <div class="w-[270px] shrink-0 flex items-center justify-end gap-2.5">
+        <!-- Col 3: Fixed 200px width (Total Quota & Branch Actions) -->
+        <div class="w-[200px] shrink-0 flex items-center justify-end gap-2.5">
           <div class="text-right font-mono mr-1">
             <div class="text-xs font-bold text-primary">${regQuota} Quota</div>
           </div>
-          <button class="h-7 px-3 rounded-lg border border-primary/40 text-primary bg-primary/5 hover:bg-primary/15 text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-all active:scale-95"
-            onclick="openQuotaManageModal('${region.name}')" title="Điều chỉnh quota cho ${region.name}">
-            <span class="material-symbols-outlined text-[14px]">tune</span>
-            Điều chỉnh
-          </button>
           <button class="h-7 px-2.5 rounded-lg border border-outline-variant/60 text-slate-600 bg-surface-container-low hover:bg-surface-container-high text-[11px] font-medium flex items-center gap-1 cursor-pointer transition-all active:scale-95"
             onclick="toggleRegionBranches('${region.id}')" title="Xem/ẩn chi nhánh">
             <span class="material-symbols-outlined text-[14px]">table_rows</span>
@@ -2435,8 +2559,10 @@ function openQuotaManageModal(selectedRegion) {
   }
 
   const metrics = getMetrics();
-  document.getElementById('qm-central-available').innerText = metrics.centralPool;
-  document.getElementById('qm-total-allocated').innerText = metrics.allocated;
+  const centralEl = document.getElementById('qm-central-available');
+  if (centralEl) centralEl.innerText = metrics.centralPool;
+  const allocEl = document.getElementById('qm-total-allocated');
+  if (allocEl) allocEl.innerText = metrics.allocated;
 
   const regFilter = document.getElementById('qm-region-filter');
   if (regFilter) regFilter.value = selectedRegion;
@@ -2444,7 +2570,8 @@ function openQuotaManageModal(selectedRegion) {
   // filterQuotaManageTable automatically scopes both table and add-branch dropdown
   filterQuotaManageTable(selectedRegion);
 
-  document.getElementById('modal-quota-manage').classList.remove('hidden');
+  const modal = document.getElementById('modal-quota-manage');
+  if (modal) modal.classList.remove('hidden');
 }
 
 function filterQuotaManageTable(regionFilter) {
@@ -2901,3 +3028,622 @@ function bulkAllocateBranchQuota(branchName) {
   renderAccounts();
   updateTopLeftNavigation();
 }
+
+// ========================================================
+// ROLE SWITCHER HANDLER
+// ========================================================
+function switchRole(role) {
+  AppState.currentRole = role;
+  const roleNameEl = document.getElementById('sidebar-role-name');
+  const roleBadgeEl = document.getElementById('sidebar-role-badge');
+  const roleSelect = document.getElementById('role-switcher-select');
+  const quotaNavItem = document.getElementById('nav-item-quotas');
+  const accScopeNotice = document.getElementById('acc-scope-notice');
+
+  if (role === 'BRANCH_ADMIN') {
+    if (roleNameEl) roleNameEl.innerText = 'Admin Ba Đình';
+    if (roleBadgeEl) {
+      roleBadgeEl.innerText = 'Chi nhánh';
+      roleBadgeEl.className = 'text-[10px] text-sky-700 font-medium';
+    }
+    if (quotaNavItem) quotaNavItem.classList.add('hidden');
+    if (accScopeNotice) accScopeNotice.classList.remove('hidden');
+    if (AppState.currentView === 'quotas') switchView('accounts');
+  } else {
+    if (roleNameEl) roleNameEl.innerText = 'Super Admin';
+    if (roleBadgeEl) {
+      roleBadgeEl.innerText = 'Toàn quyền';
+      roleBadgeEl.className = 'text-[10px] text-emerald-700 font-medium';
+    }
+    if (quotaNavItem) quotaNavItem.classList.remove('hidden');
+    if (accScopeNotice) accScopeNotice.classList.add('hidden');
+  }
+
+  if (roleSelect) roleSelect.value = role;
+
+  // Re-render active view
+  if (AppState.currentView === 'accounts') renderAccounts();
+  else if (AppState.currentView === 'quotas') renderQuotas();
+  else if (AppState.currentView === 'audit') renderAudit();
+  else if (AppState.currentView === 'chat-monitor') renderChatMonitor();
+}
+
+// ========================================================
+// PHÂN HỆ: GIÁM SÁT HỘI THOẠI (CHAT MONITOR - ZALO MIRRORING)
+// ========================================================
+
+AppState.chatMonitor = {
+  selectedRegion: 'all',
+  selectedBranch: 'all',
+  selectedAccountId: 'ZA-001',
+  selectedConversationId: 'CONV-001',
+  activeTab: 'all',
+  searchQuery: '',
+  conversations: {
+    'ZA-001': [
+      {
+        id: 'CONV-001',
+        customerName: 'Nguyễn Văn An',
+        customerAvatar: 'NA',
+        customerType: 'Khách cá nhân',
+        customerPhone: '0912.345.678',
+        customerMeta: 'SĐT: 0912.345.678 • Hoạt động 5 phút trước',
+        lastMessage: 'Dạ FPT Telecom thu cước qua cổng thanh toán ạ!',
+        lastTime: '10:41',
+        unreadCount: 0,
+        messages: [
+          { id: 'M1', sender: 'customer', text: 'Dạ em chào anh, em đang tìm hiểu lắp gói cước Internet cho gia đình ở phố Đội Cấn, Ba Đình ạ.', time: '10:30', status: 'Đã nhận' },
+          { id: 'M2', sender: 'sales', text: 'Chào anh An! Cảm ơn anh đã liên hệ FPT Telecom Ba Đình. Em Quân xin gửi anh bảng giá cước ưu đãi tháng 10 mới nhất kèm chương trình tặng tháng cước trải nghiệm:', time: '10:32', status: 'Đã xem' },
+          { id: 'M3', sender: 'sales', type: 'file', fileName: 'Bang_gia_FPT_Net500_2026.pdf', fileSize: '1.2 MB', fileExt: 'PDF', time: '10:32', status: 'Đã xem' },
+          { id: 'M4', sender: 'sales', type: 'image', imageUrl: 'https://images.unsplash.com/photo-1544197150-b99a580bb7a8?auto=format&fit=crop&w=800&q=80', imageCaption: 'Thiết bị Modem Wi-Fi 6 AX1800GZ 2 băng tần chuẩn FPT', time: '10:33', status: 'Đã xem' },
+          { id: 'M5', sender: 'customer', type: 'voice', duration: '0:24', voiceText: 'Anh cho em hỏi nếu đóng trước 6 tháng thì có miễn phí lắp đặt không em?', time: '10:35', status: 'Đã nhận' },
+          { id: 'M6', sender: 'sales', text: 'Dạ đúng rồi anh An nhé! Khi tham gia trả trước 6 tháng, anh được miễn phí 100% chi phí lắp đặt, trang bị modem Wi-Fi 6 và tặng thêm 1 tháng cước thứ 7 hoàn toàn miễn phí ạ.', time: '10:36', status: 'Đã xem' },
+          { id: 'M7', type: 'divider', text: 'BÀN GIAO TỪ LÊ HOÀNG NAM SANG TRẦN MINH QUÂN LÚC 08:00 NGÀY 28/09/2026' },
+          { id: 'M8', sender: 'customer', type: 'recalled', recallTime: '10:40 01/10/2026', originalText: 'Anh gửi STK cá nhân để em chuyển khoản tiền cọc 500k trước nhé.', time: '10:40' },
+          { id: 'M9', sender: 'sales', text: 'Dạ anh An yên tâm, FPT Telecom thu cước hoàn toàn minh bạch qua Cổng thanh toán trực tuyến Foxpay/VNPay hoặc nhân viên có phiếu thu điện tử gửi SMS/Email chính chủ. Tuyệt đối nhân viên không thu tiền qua số tài khoản cá nhân ạ!', time: '10:41', status: 'Đã gửi' }
+        ]
+      },
+      {
+        id: 'CONV-002',
+        customerName: 'Chị Mai Phương',
+        customerAvatar: 'MP',
+        customerType: 'Khách doanh nghiệp',
+        customerPhone: '0983.888.999',
+        customerMeta: 'SĐT: 0983.888.999 • Hoạt động 1 giờ trước',
+        lastMessage: 'Em gửi anh hợp đồng điện tử qua email nhé',
+        lastTime: '09:15',
+        unreadCount: 1,
+        messages: [
+          { id: 'M201', sender: 'customer', text: 'Chào Quân, bên công ty chị ở Kim Mã cần nâng cấp gói Internet quang 500Mbps và thêm 2 địa chỉ IP tĩnh.', time: '09:00', status: 'Đã nhận' },
+          { id: 'M202', sender: 'sales', text: 'Dạ em chào chị Phương! Gói Super500 Doanh nghiệp bên em cam kết băng thông quốc tế 15Mbps và tặng kèm 1 IP tĩnh miễn phí, nếu lấy thêm 1 IP tĩnh nữa là 500k/tháng ạ.', time: '09:05', status: 'Đã xem' },
+          { id: 'M203', sender: 'sales', type: 'file', fileName: 'Hop_dong_Doanh_nghiep_FPT_KimMa.docx', fileSize: '850 KB', fileExt: 'DOCX', time: '09:10', status: 'Đã xem' },
+          { id: 'M204', sender: 'customer', text: 'Em gửi anh hợp đồng điện tử qua email nhé, bên chị duyệt rồi tiến hành ký số trong chiều nay.', time: '09:15', status: 'Đã nhận' }
+        ]
+      },
+      {
+        id: 'CONV-003',
+        customerName: 'Bác Hoàng Văn Thụ',
+        customerAvatar: 'HT',
+        customerType: 'Hỗ trợ Kỹ thuật',
+        customerPhone: '0903.111.222',
+        customerMeta: 'SĐT: 0903.111.222 • Hoạt động hôm qua',
+        lastMessage: 'Dạ kỹ thuật đã qua hỗ trợ đổi nguồn camera cho bác rồi ạ',
+        lastTime: 'Hôm qua',
+        unreadCount: 0,
+        messages: [
+          { id: 'M301', sender: 'customer', text: 'Cháu ơi camera phòng khách nhà bác ở Liễu Giai bị mất tín hiệu từ tối qua.', time: 'Hôm qua 14:00', status: 'Đã nhận' },
+          { id: 'M302', sender: 'sales', text: 'Dạ bác Thụ ơi, cháu đã báo anh Tuấn kỹ thuật khu vực Ba Đình qua kiểm tra tận nhà cho bác trong 30 phút nữa ạ.', time: 'Hôm qua 14:05', status: 'Đã xem' },
+          { id: 'M303', sender: 'sales', type: 'location', locationTitle: 'VP FPT Telecom Ba Đình', locationAddress: '48 Vạn Bảo, Phường Liễu Giai, Ba Đình, Hà Nội', time: 'Hôm qua 14:06', status: 'Đã xem' },
+          { id: 'M304', sender: 'sales', text: 'Dạ kỹ thuật đã qua hỗ trợ đổi nguồn camera cho bác rồi ạ. Bác kiểm tra lại xem hình ảnh sắc nét bình thường chưa giúp cháu nhé!', time: 'Hôm qua 15:30', status: 'Đã xem' }
+        ]
+      }
+    ],
+    'ZA-002': [
+      {
+        id: 'CONV-004',
+        customerName: 'Anh Phạm Thành Long',
+        customerAvatar: 'TL',
+        customerType: 'Khách cá nhân',
+        customerPhone: '0977.654.321',
+        customerMeta: 'SĐT: 0977.654.321 • Hoạt động 15 phút trước',
+        lastMessage: 'Combo Internet + FPT Play xem Ngoại hạng Anh giá bao nhiêu em?',
+        lastTime: '11:05',
+        unreadCount: 1,
+        messages: [
+          { id: 'M401', sender: 'customer', text: 'Chào em Nam, anh đang tìm hiểu gói Combo Internet + FPT Play xem Ngoại hạng Anh bên Cầu Giấy giá bao nhiêu em?', time: '11:05', status: 'Đã nhận' }
+        ]
+      },
+      {
+        id: 'CONV-005',
+        customerName: 'Chị Đỗ Thu Hà',
+        customerAvatar: 'TH',
+        customerType: 'Khách cá nhân',
+        customerPhone: '0915.222.333',
+        customerMeta: 'SĐT: 0915.222.333 • Hoạt động sáng nay',
+        lastMessage: 'Đã hoàn tất thanh toán hóa đơn cước',
+        lastTime: '08:45',
+        unreadCount: 0,
+        messages: [
+          { id: 'M501', sender: 'sales', text: 'Chào chị Hà, hóa đơn cước Internet tháng 9 của chị đã đến kỳ thanh toán ạ.', time: '08:30', status: 'Đã xem' },
+          { id: 'M502', sender: 'customer', text: 'Chị vừa thanh toán qua app Hi FPT xong rồi em nhé, cảm ơn em!', time: '08:45', status: 'Đã nhận' }
+        ]
+      }
+    ],
+    'ZA-003': [
+      {
+        id: 'CONV-006',
+        customerName: 'Nguyễn Thị Bích',
+        customerAvatar: 'NB',
+        customerType: 'Khách cá nhân',
+        customerPhone: '0934.555.666',
+        customerMeta: 'SĐT: 0934.555.666 • Hoạt động 30 phút trước',
+        lastMessage: 'Em gửi chị link kích hoạt tài khoản Zalo nhé',
+        lastTime: '10:15',
+        unreadCount: 0,
+        messages: [
+          { id: 'M601', sender: 'sales', text: 'Chào chị Bích, em Nam FPT Ba Đình gửi chị thông tin gói cước Camera IQ3 thông minh ạ.', time: '10:00', status: 'Đã xem' },
+          { id: 'M602', sender: 'customer', text: 'Em gửi chị link kích hoạt tài khoản Zalo nhé.', time: '10:15', status: 'Đã nhận' }
+        ]
+      }
+    ]
+  }
+};
+
+// Render full Chat Monitor View
+function renderChatMonitor() {
+  const breadcrumb = document.getElementById('topbar-breadcrumb-view');
+  if (breadcrumb) breadcrumb.innerText = 'Giám sát Hội thoại (Read-Only)';
+
+  const isBranchAdmin = AppState.currentRole === 'BRANCH_ADMIN';
+  const regionSel = document.getElementById('chat-filter-region');
+  const branchSel = document.getElementById('chat-filter-branch');
+  const salesSel = document.getElementById('chat-select-sales');
+
+  // 1. Populate Region Dropdown
+  if (regionSel) {
+    if (isBranchAdmin) {
+      regionSel.innerHTML = `<option value="Vùng 1 - Hà Nội" selected>Vùng 1 - Hà Nội</option>`;
+      regionSel.disabled = true;
+      AppState.chatMonitor.selectedRegion = 'Vùng 1 - Hà Nội';
+    } else {
+      regionSel.disabled = false;
+      let html = '<option value="all">Tất cả 7 Vùng</option>';
+      AppState.regions.forEach(r => {
+        const sel = r.name === AppState.chatMonitor.selectedRegion ? 'selected' : '';
+        html += `<option value="${r.name}" ${sel}>${r.name}</option>`;
+      });
+      regionSel.innerHTML = html;
+    }
+  }
+
+  // 2. Populate Branch Dropdown
+  if (branchSel) {
+    if (isBranchAdmin) {
+      branchSel.innerHTML = `<option value="Chi nhánh Ba Đình" selected>Chi nhánh Ba Đình</option>`;
+      branchSel.disabled = true;
+      AppState.chatMonitor.selectedBranch = 'Chi nhánh Ba Đình';
+    } else {
+      branchSel.disabled = false;
+      let html = '<option value="all">Tất cả chi nhánh</option>';
+      AppState.regions.forEach(r => {
+        if (AppState.chatMonitor.selectedRegion === 'all' || AppState.chatMonitor.selectedRegion === r.name) {
+          r.branches.forEach(b => {
+            const sel = b.name === AppState.chatMonitor.selectedBranch ? 'selected' : '';
+            html += `<option value="${b.name}" ${sel}>${b.name} (${r.name.split(' - ')[0]})</option>`;
+          });
+        }
+      });
+      branchSel.innerHTML = html;
+    }
+  }
+
+  // 3. Populate Sales Selector Dropdown
+  if (salesSel) {
+    let candidateAccounts = AppState.accounts.filter(a => a.ownerName !== null && a.status === 'ACTIVE');
+
+    if (isBranchAdmin) {
+      candidateAccounts = candidateAccounts.filter(a => a.branch === 'Chi nhánh Ba Đình');
+    } else {
+      if (AppState.chatMonitor.selectedRegion !== 'all') {
+        candidateAccounts = candidateAccounts.filter(a => a.region === AppState.chatMonitor.selectedRegion);
+      }
+      if (AppState.chatMonitor.selectedBranch !== 'all') {
+        candidateAccounts = candidateAccounts.filter(a => a.branch === AppState.chatMonitor.selectedBranch);
+      }
+    }
+
+    if (candidateAccounts.length === 0) {
+      candidateAccounts = AppState.accounts.filter(a => a.ownerName !== null).slice(0, 3);
+    }
+
+    let optionsHtml = '';
+    candidateAccounts.forEach(acc => {
+      const isSelected = acc.id === AppState.chatMonitor.selectedAccountId ? 'selected' : '';
+      optionsHtml += `<option value="${acc.id}" ${isSelected}>${acc.id} • ${acc.displayName || acc.ownerName} (${acc.branch})</option>`;
+    });
+    salesSel.innerHTML = optionsHtml;
+
+    if (!candidateAccounts.some(a => a.id === AppState.chatMonitor.selectedAccountId)) {
+      if (candidateAccounts.length > 0) {
+        AppState.chatMonitor.selectedAccountId = candidateAccounts[0].id;
+        salesSel.value = candidateAccounts[0].id;
+      }
+    }
+  }
+
+  // 4. Update Sales Profile Card & Footer
+  updateActiveSalesProfileCard();
+
+  // 5. Render Dynamic Watermark
+  renderDynamicWatermark();
+
+  // 6. Render Conversation List & Message Feed
+  renderChatConversationList();
+  renderChatMessageFeed();
+}
+
+function updateActiveSalesProfileCard() {
+  const accId = AppState.chatMonitor.selectedAccountId;
+  const acc = AppState.accounts.find(a => a.id === accId) || AppState.accounts[0];
+
+  const salesNameEl = document.getElementById('chat-sales-name');
+  const salesMetaEl = document.getElementById('chat-sales-meta');
+  const salesInitialsEl = document.getElementById('chat-sales-avatar-initials');
+  const footerSalesNameEl = document.getElementById('chat-footer-sales-name');
+
+  const name = acc.displayName || acc.ownerName || 'Trần Minh Quân';
+  const empCode = acc.empCode || 'NV042';
+  const branch = acc.branch || 'Chi nhánh Ba Đình';
+
+  if (salesNameEl) salesNameEl.innerText = name;
+  if (salesMetaEl) salesMetaEl.innerText = `${empCode} • ${branch} • ${acc.id}`;
+  if (footerSalesNameEl) footerSalesNameEl.innerText = name;
+
+  if (salesInitialsEl) {
+    const parts = name.trim().split(' ');
+    salesInitialsEl.innerText = parts.length > 1 ? (parts[parts.length - 2][0] + parts[parts.length - 1][0]).toUpperCase() : name.substring(0, 2).toUpperCase();
+  }
+}
+
+function renderDynamicWatermark() {
+  const watermarkContainer = document.getElementById('chat-dynamic-watermark');
+  if (!watermarkContainer) return;
+
+  const actor = AppState.currentRole === 'SUPER_ADMIN' ? 'Super Admin (AD001)' : 'Admin Ba Đình (AD101)';
+  const dateStr = new Date().toLocaleDateString('vi-VN');
+  const stampText = `[SOP SECURITY] ${actor} • ${dateStr} • 118.69.182.45`;
+
+  let html = '';
+  for (let i = 0; i < 20; i++) {
+    html += `<div class="whitespace-nowrap">${stampText}</div>`;
+  }
+  watermarkContainer.innerHTML = html;
+}
+
+function onChatFilterRegionChanged(regionVal) {
+  AppState.chatMonitor.selectedRegion = regionVal;
+  AppState.chatMonitor.selectedBranch = 'all';
+  renderChatMonitor();
+}
+
+function onChatFilterBranchChanged(branchVal) {
+  AppState.chatMonitor.selectedBranch = branchVal;
+  renderChatMonitor();
+}
+
+function onChatSelectSalesChanged(accId) {
+  AppState.chatMonitor.selectedAccountId = accId;
+  
+  const convs = getConversationsForAccount(accId);
+  if (convs.length > 0) {
+    AppState.chatMonitor.selectedConversationId = convs[0].id;
+  }
+
+  updateActiveSalesProfileCard();
+  renderChatConversationList();
+  renderChatMessageFeed();
+
+  const acc = AppState.accounts.find(a => a.id === accId);
+  const salesName = acc ? (acc.displayName || acc.ownerName) : accId;
+  addAuditLog('Giám sát hội thoại', accId, `Mở xem toàn bộ lịch sử tin nhắn của Salesman ${salesName} (${accId})`);
+}
+
+function getConversationsForAccount(accId) {
+  if (AppState.chatMonitor.conversations[accId]) {
+    return AppState.chatMonitor.conversations[accId];
+  }
+  return [
+    {
+      id: `CONV-GEN-${accId}-1`,
+      customerName: 'Nguyễn Văn An',
+      customerAvatar: 'NA',
+      customerType: 'Khách cá nhân',
+      customerPhone: '0912.345.678',
+      customerMeta: 'SĐT: 0912.345.678 • Hoạt động 10 phút trước',
+      lastMessage: 'Dạ em cảm ơn anh đã tư vấn nhiệt tình ạ!',
+      lastTime: '10:45',
+      unreadCount: 0,
+      messages: [
+        { id: 'GM1', sender: 'customer', text: 'Chào bạn, mình cần lắp đặt mạng Internet FPT.', time: '10:20', status: 'Đã nhận' },
+        { id: 'GM2', sender: 'sales', text: 'Dạ chào anh, em xin gửi anh các gói cước gia đình ưu đãi tốt nhất:', time: '10:25', status: 'Đã xem' },
+        { id: 'GM3', sender: 'sales', type: 'file', fileName: 'Goi_cuoc_FPT_2026.pdf', fileSize: '980 KB', fileExt: 'PDF', time: '10:25', status: 'Đã xem' },
+        { id: 'GM4', sender: 'customer', text: 'Dạ em cảm ơn anh đã tư vấn nhiệt tình ạ!', time: '10:45', status: 'Đã nhận' }
+      ]
+    },
+    {
+      id: `CONV-GEN-${accId}-2`,
+      customerName: 'Chị Mai Phương',
+      customerAvatar: 'MP',
+      customerType: 'Khách doanh nghiệp',
+      customerPhone: '0983.888.999',
+      customerMeta: 'SĐT: 0983.888.999 • Hoạt động 2 giờ trước',
+      lastMessage: 'Em gửi hợp đồng qua email giúp chị nhé',
+      lastTime: '08:30',
+      unreadCount: 1,
+      messages: [
+        { id: 'GM5', sender: 'customer', text: 'Em gửi hợp đồng qua email giúp chị nhé', time: '08:30', status: 'Đã nhận' }
+      ]
+    }
+  ];
+}
+
+function renderChatConversationList() {
+  const container = document.getElementById('chat-conversation-list');
+  if (!container) return;
+
+  const accId = AppState.chatMonitor.selectedAccountId;
+  let convs = getConversationsForAccount(accId);
+
+  const countAllEl = document.getElementById('chat-count-all');
+  const countUnreadEl = document.getElementById('chat-count-unread');
+  if (countAllEl) countAllEl.innerText = convs.length;
+  if (countUnreadEl) countUnreadEl.innerText = convs.filter(c => c.unreadCount > 0).length;
+
+  if (AppState.chatMonitor.searchQuery) {
+    const q = AppState.chatMonitor.searchQuery.toLowerCase();
+    convs = convs.filter(c => c.customerName.toLowerCase().includes(q) || c.customerPhone.includes(q) || c.lastMessage.toLowerCase().includes(q));
+  }
+
+  if (AppState.chatMonitor.activeTab === 'unread') {
+    convs = convs.filter(c => c.unreadCount > 0);
+  }
+
+  const tabAll = document.getElementById('chat-tab-all');
+  const tabUnread = document.getElementById('chat-tab-unread');
+  if (AppState.chatMonitor.activeTab === 'all') {
+    if (tabAll) { tabAll.className = 'px-2.5 py-1 rounded bg-white text-primary border border-outline-variant/40 shadow-2xs font-bold cursor-pointer transition-all'; }
+    if (tabUnread) { tabUnread.className = 'px-2.5 py-1 rounded text-on-surface-variant hover:bg-white/60 cursor-pointer transition-all'; }
+  } else {
+    if (tabAll) { tabAll.className = 'px-2.5 py-1 rounded text-on-surface-variant hover:bg-white/60 cursor-pointer transition-all'; }
+    if (tabUnread) { tabUnread.className = 'px-2.5 py-1 rounded bg-white text-primary border border-outline-variant/40 shadow-2xs font-bold cursor-pointer transition-all'; }
+  }
+
+  if (convs.length === 0) {
+    container.innerHTML = `
+      <div class="p-6 text-center text-xs text-slate-400">
+        <span class="material-symbols-outlined text-[32px] mb-1 text-slate-300">chat_bubble_outline</span>
+        <p>Không tìm thấy cuộc trò chuyện phù hợp</p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+  convs.forEach(c => {
+    const isSelected = c.id === AppState.chatMonitor.selectedConversationId;
+    const activeClass = isSelected ? 'bg-sky-50/90 border-l-4 border-primary font-medium' : 'hover:bg-surface-container-low/60';
+    const unreadBadge = c.unreadCount > 0 ? `<span class="px-1.5 py-0.2 rounded-full bg-error text-white text-[10px] font-bold">${c.unreadCount}</span>` : '';
+
+    html += `
+      <div class="p-3 cursor-pointer transition-colors flex items-start gap-2.5 ${activeClass}" onclick="selectChatConversation('${c.id}')">
+        <div class="w-10 h-10 rounded-full bg-blue-100 text-primary font-bold text-xs flex items-center justify-center shrink-0 border border-blue-200">
+          ${c.customerAvatar}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-1 mb-0.5">
+            <span class="text-xs font-bold text-on-surface truncate">${c.customerName}</span>
+            <span class="text-[10px] text-slate-400 shrink-0">${c.lastTime}</span>
+          </div>
+          <div class="flex items-center justify-between gap-1">
+            <p class="text-[11px] text-on-surface-variant truncate">${c.lastMessage}</p>
+            ${unreadBadge}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+function selectChatConversation(convId) {
+  AppState.chatMonitor.selectedConversationId = convId;
+  renderChatConversationList();
+  renderChatMessageFeed();
+}
+
+function setChatConversationFilter(filterType) {
+  AppState.chatMonitor.activeTab = filterType;
+  renderChatConversationList();
+}
+
+function filterChatConversations(query) {
+  AppState.chatMonitor.searchQuery = query;
+  renderChatConversationList();
+}
+
+function renderChatMessageFeed() {
+  const feedContainer = document.getElementById('chat-message-feed');
+  if (!feedContainer) return;
+
+  const accId = AppState.chatMonitor.selectedAccountId;
+  const convs = getConversationsForAccount(accId);
+  const activeConv = convs.find(c => c.id === AppState.chatMonitor.selectedConversationId) || convs[0];
+
+  if (!activeConv) {
+    feedContainer.innerHTML = '<div class="p-6 text-center text-xs text-slate-400">Chưa có hội thoại nào</div>';
+    return;
+  }
+
+  const nameEl = document.getElementById('chat-active-customer-name');
+  const avatarEl = document.getElementById('chat-active-customer-avatar');
+  const metaEl = document.getElementById('chat-active-customer-meta');
+
+  if (nameEl) nameEl.innerText = activeConv.customerName;
+  if (avatarEl) avatarEl.innerText = activeConv.customerAvatar;
+  if (metaEl) metaEl.innerText = `${activeConv.customerPhone || '0912.345.678'} • Hoạt động gần đây`;
+
+  let html = `
+    <div class="text-center my-1 select-none">
+      <span class="px-3 py-1 rounded-full bg-slate-200/80 text-[10px] font-semibold text-slate-600">Hôm nay, 01/10/2026</span>
+    </div>
+  `;
+
+  activeConv.messages.forEach(m => {
+    if (m.type === 'divider') {
+      html += `
+        <div class="my-2 py-1.5 px-3 bg-amber-100/90 border border-amber-300/80 rounded-lg text-[11px] text-amber-900 text-center font-semibold flex items-center justify-center gap-2 shadow-2xs select-none">
+          <span class="material-symbols-outlined text-[16px] text-amber-700">swap_horiz</span>
+          <span>${m.text}</span>
+        </div>
+      `;
+      return;
+    }
+
+    if (m.type === 'recalled') {
+      html += `
+        <div class="flex flex-col items-start max-w-md my-1">
+          <div class="p-2.5 rounded-xl border border-dashed border-red-300 bg-red-50/60 text-xs text-on-surface flex flex-col gap-1 shadow-2xs">
+            <div class="flex items-center gap-1 text-[11px] text-error font-bold select-none">
+              <span class="material-symbols-outlined text-[15px]">undo</span>
+              <span>[Đã thu hồi trên Zalo lúc ${m.recallTime}]</span>
+            </div>
+            <div class="italic line-through text-slate-500 font-mono text-[11px]">"${m.originalText}"</div>
+          </div>
+          <span class="text-[10px] text-slate-400 mt-0.5 ml-1">${m.time}</span>
+        </div>
+      `;
+      return;
+    }
+
+    const isSales = m.sender === 'sales';
+    const alignClass = isSales ? 'items-end' : 'items-start';
+    const bubbleClass = isSales 
+      ? 'bg-[#006194] text-white rounded-2xl rounded-tr-xs shadow-xs' 
+      : 'bg-white text-on-surface rounded-2xl rounded-tl-xs shadow-2xs border border-outline-variant/30';
+    const statusIcon = isSales ? `<span class="text-[10px] text-blue-200 font-medium flex items-center gap-0.5 ml-1"><span class="material-symbols-outlined text-[12px]">done_all</span> ${m.status}</span>` : '';
+
+    let contentHtml = '';
+    if (m.type === 'file') {
+      contentHtml = `
+        <div class="flex items-center gap-2.5 p-1">
+          <div class="w-9 h-9 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-bold text-xs shrink-0">
+            ${m.fileExt}
+          </div>
+          <div class="flex flex-col min-w-0">
+            <span class="text-xs font-semibold underline truncate max-w-[200px]">${m.fileName}</span>
+            <span class="text-[10px] text-blue-200">${m.fileSize} • Đã quét an toàn</span>
+          </div>
+          <button class="w-7 h-7 rounded bg-white/20 hover:bg-white/30 flex items-center justify-center text-white cursor-pointer ml-1" onclick="alert('Đang tải xuống tệp tin: ${m.fileName} phục vụ đối soát an toàn.')">
+            <span class="material-symbols-outlined text-[16px]">download</span>
+          </button>
+        </div>
+      `;
+    } else if (m.type === 'image') {
+      contentHtml = `
+        <div class="flex flex-col gap-1.5 p-1">
+          <div class="relative rounded-xl overflow-hidden cursor-pointer group" onclick="openChatImagePreview('${m.imageUrl}', '${m.imageCaption}')">
+            <img src="${m.imageUrl}" alt="Zalo Attachment" class="max-w-[260px] h-[150px] object-cover rounded-xl transition-transform group-hover:scale-105">
+            <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-medium text-xs gap-1">
+              <span class="material-symbols-outlined text-[18px]">zoom_in</span> Click để phóng to
+            </div>
+          </div>
+          <span class="text-[11px] text-blue-100 italic px-1">${m.imageCaption}</span>
+        </div>
+      `;
+    } else if (m.type === 'voice') {
+      contentHtml = `
+        <div class="flex items-center gap-3 p-1 min-w-[220px]">
+          <button id="btn-voice-${m.id}" class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center shadow-xs cursor-pointer hover:bg-primary-container" onclick="toggleVoiceAudio('btn-voice-${m.id}')">
+            <span class="material-symbols-outlined text-[18px]">play_arrow</span>
+          </button>
+          <div class="flex flex-col flex-1">
+            <div class="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+              <div class="bg-primary h-full w-1/3"></div>
+            </div>
+            <div class="flex items-center justify-between text-[10px] text-slate-500 mt-1">
+              <span>Tin nhắn thoại</span>
+              <span class="font-mono font-semibold">${m.duration}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (m.type === 'location') {
+      contentHtml = `
+        <div class="flex flex-col gap-1.5 p-1 min-w-[240px]">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-red-600 text-[20px]">location_on</span>
+            <div class="flex flex-col">
+              <strong class="text-xs font-bold text-white">${m.locationTitle}</strong>
+              <span class="text-[10px] text-blue-100">${m.locationAddress}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      contentHtml = `<p class="text-xs leading-relaxed px-1 py-0.5">${m.text}</p>`;
+    }
+
+    html += `
+      <div class="flex flex-col ${alignClass} max-w-[75%]">
+        <div class="px-3.5 py-2.5 ${bubbleClass}">
+          ${contentHtml}
+        </div>
+        <div class="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5 px-1 select-none">
+          <span>${m.time}</span>
+          ${statusIcon}
+        </div>
+      </div>
+    `;
+  });
+
+  feedContainer.innerHTML = html;
+  feedContainer.scrollTop = feedContainer.scrollHeight;
+}
+
+function openChatImagePreview(src, title) {
+  const modal = document.getElementById('modal-chat-image-preview');
+  const imgEl = document.getElementById('chat-preview-image-src');
+  const titleEl = document.getElementById('chat-preview-image-title');
+
+  if (imgEl) imgEl.src = src;
+  if (titleEl) titleEl.innerText = title || 'Hình ảnh đính kèm Zalo';
+  if (modal) modal.classList.remove('hidden');
+}
+
+function openDrawerForActiveSales() {
+  const accId = AppState.chatMonitor.selectedAccountId;
+  if (accId) {
+    openDrawer(accId);
+  }
+}
+
+function toggleVoiceAudio(btnId) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  const icon = btn.querySelector('.material-symbols-outlined');
+  if (!icon) return;
+
+  if (icon.innerText === 'play_arrow') {
+    icon.innerText = 'pause';
+    btn.classList.add('bg-emerald-600');
+    setTimeout(() => {
+      icon.innerText = 'play_arrow';
+      btn.classList.remove('bg-emerald-600');
+    }, 3000);
+  } else {
+    icon.innerText = 'play_arrow';
+    btn.classList.remove('bg-emerald-600');
+  }
+}
+

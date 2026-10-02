@@ -83,6 +83,11 @@
           <span>Quota đơn vị</span>
         </button>
 
+        <button id="nav-item-chat-monitor" class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer text-left text-on-surface-variant hover:bg-surface-container-low" data-view="chat-monitor" onclick="switchView('chat-monitor')">
+          <span class="material-symbols-outlined text-[18px]">forum</span>
+          <span>Giám sát Hội thoại</span>
+        </button>
+
         <button id="nav-item-audit" class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer text-left text-on-surface-variant hover:bg-surface-container-low" data-view="audit" onclick="switchView('audit')">
           <span class="material-symbols-outlined text-[18px]">history</span>
           <span>Nhật ký hoạt động</span>
@@ -163,83 +168,55 @@
           <span>Bạn đang đăng nhập với vai trò <strong>Admin chi nhánh</strong>. Dữ liệu chỉ hiển thị các tài khoản thuộc <strong><span id="acc-scope-branch-name">Chi nhánh Ba Đình</span></strong>.</span>
         </div>
 
-        <!-- Top Section: 2 Sections Layout (5 KPI Cards + Thanh nộ bên trái | Cần chú ý bên phải) -->
+        <!-- Top Section: 2 Sections Layout (5 KPI Cards bên trái | Cần chú ý bên phải) -->
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          <!-- Cột Trái (8 Cols): 5 KPI Cards + Thanh nộ đo lường -->
-          <div class="lg:col-span-8 flex flex-col justify-between gap-2.5">
+          <!-- Cột Trái (8 Cols): 5 KPI Cards -->
+          <div class="lg:col-span-8">
             <!-- 5 Thẻ chỉ số tổng quan -->
-            <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2">
-              <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
+            <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5 h-full">
+              <div class="p-3 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
                 <div class="flex items-center justify-between text-xs text-on-surface-variant">
                   <span id="acc-kpi-total-label">Tổng quota</span>
                   <span class="material-symbols-outlined text-primary text-[18px]">inventory_2</span>
                 </div>
-                <div id="acc-kpi-total" class="text-2xl font-bold text-on-surface mt-1">100</div>
-                <div id="acc-kpi-total-sub" class="text-[10px] text-slate-500">Ngân sách hệ thống</div>
+                <div id="acc-kpi-total" class="text-2xl font-bold text-on-surface mt-2">100</div>
+                <div id="acc-kpi-total-sub" class="text-[10px] text-slate-500 mt-1">Ngân sách hệ thống</div>
               </div>
 
-              <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
+              <div class="p-3 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
                 <div class="flex items-center justify-between text-xs text-on-surface-variant">
                   <span id="acc-kpi-allocated-label">Đã phân bổ</span>
                   <span class="material-symbols-outlined text-emerald-600 text-[18px]">domain</span>
                 </div>
-                <div id="acc-kpi-allocated" class="text-2xl font-bold text-emerald-700 mt-1">70</div>
-                <div id="acc-kpi-allocated-sub" class="text-[10px] text-slate-500">Chiếm 70% tổng quota</div>
+                <div id="acc-kpi-allocated" class="text-2xl font-bold text-emerald-700 mt-2">70</div>
+                <div id="acc-kpi-allocated-sub" class="text-[10px] text-slate-500 mt-1">Chiếm 70% tổng quota</div>
               </div>
 
-              <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
+              <div class="p-3 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
                 <div class="flex items-center justify-between text-xs text-on-surface-variant">
                   <span id="acc-kpi-central-label">Chưa phân bổ</span>
                   <span class="material-symbols-outlined text-amber-600 text-[18px]">layers</span>
                 </div>
-                <div id="acc-kpi-central" class="text-2xl font-bold text-amber-700 mt-1">30</div>
-                <div id="acc-kpi-central-sub" class="text-[10px] text-slate-500">Chiếm 30% tổng quota</div>
+                <div id="acc-kpi-central" class="text-2xl font-bold text-amber-700 mt-2">30</div>
+                <div id="acc-kpi-central-sub" class="text-[10px] text-slate-500 mt-1">Chiếm 30% tổng quota</div>
               </div>
 
-              <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
+              <div class="p-3 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
                 <div class="flex items-center justify-between text-xs text-on-surface-variant">
                   <span>Chờ kích hoạt</span>
                   <span class="material-symbols-outlined text-amber-500 text-[18px]">schedule</span>
                 </div>
-                <div id="acc-kpi-pending" class="text-2xl font-bold text-amber-600 mt-1">3</div>
-                <div class="text-[10px] text-slate-500">Đăng nhập lần đầu</div>
+                <div id="acc-kpi-pending" class="text-2xl font-bold text-amber-600 mt-2">3</div>
+                <div class="text-[10px] text-slate-500 mt-1">Đăng nhập lần đầu</div>
               </div>
 
-              <div class="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
+              <div class="p-3 rounded-lg bg-surface-container-lowest border border-outline-variant/60 shadow-xs flex flex-col justify-between">
                 <div class="flex items-center justify-between text-xs text-on-surface-variant">
                   <span>Tạm khóa</span>
                   <span class="material-symbols-outlined text-slate-500 text-[18px]">lock</span>
                 </div>
-                <div id="acc-kpi-locked" class="text-2xl font-bold text-slate-700 mt-1">3</div>
-                <div class="text-[10px] text-slate-500">Tạm ngừng hoạt động</div>
-              </div>
-            </div>
-
-            <!-- Thanh nộ đo lường mức độ đưa vào sử dụng -->
-            <div class="p-3 bg-surface-container-lowest border border-outline-variant/60 rounded-lg shadow-xs flex flex-col justify-between">
-              <div class="flex items-center justify-between text-xs mb-1.5">
-                <div class="flex items-center gap-1.5 font-bold text-on-surface">
-                  <span class="material-symbols-outlined text-primary text-[18px]">donut_large</span>
-                  <span>Tổng quan sử dụng:</span>
-                  <span id="acc-gauge-ratio" class="text-primary font-bold">100 tài khoản</span>
-                </div>
-                <span id="acc-gauge-percent" class="text-xs font-bold text-primary px-2 py-0.5 rounded bg-primary/10">100%</span>
-              </div>
-
-              <!-- Thanh nộ visual multi-segment bar (100% khớp các Tabs) -->
-              <div class="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden flex shadow-inner">
-                <div id="acc-gauge-bar-active" class="h-full bg-emerald-500 transition-all duration-300" style="width: 60%;" title="Đang hoạt động: 60"></div>
-                <div id="acc-gauge-bar-pending" class="h-full bg-amber-400 transition-all duration-300" style="width: 3%;" title="Chờ kích hoạt: 3"></div>
-                <div id="acc-gauge-bar-locked" class="h-full bg-slate-400 transition-all duration-300" style="width: 3%;" title="Tạm khóa: 3"></div>
-                <div id="acc-gauge-bar-empty" class="h-full bg-sky-400 transition-all duration-300" style="width: 34%;" title="Chưa phân bổ: 34"></div>
-              </div>
-
-              <div id="acc-gauge-sublegend" class="flex items-center justify-between text-[11px] text-slate-500 mt-1.5 pt-1 border-t border-outline-variant/30 flex-wrap gap-2">
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> <span>Đang hoạt động: <strong id="acc-sublegend-active" class="text-emerald-700">60</strong></span></div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span> <span>Chờ kích hoạt: <strong id="acc-sublegend-pending" class="text-amber-700">3</strong></span></div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-400"></span> <span>Tạm khóa: <strong id="acc-sublegend-locked" class="text-slate-700">3</strong></span></div>
-                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-400"></span> <span>Chưa phân bổ: <strong id="acc-sublegend-empty" class="text-sky-700">34</strong></span></div>
-                <span id="acc-sublegend-total" class="text-slate-400 font-mono">Tổng: 100</span>
+                <div id="acc-kpi-locked" class="text-2xl font-bold text-slate-700 mt-2">3</div>
+                <div class="text-[10px] text-slate-500 mt-1">Tạm ngừng hoạt động</div>
               </div>
             </div>
           </div>
@@ -309,16 +286,12 @@
             </div>
           </div>
 
-          <!-- Trailing Toolbar Actions: Provision Button & Count -->
+          <!-- Trailing Toolbar Actions: Provision Button -->
           <div class="flex items-center gap-3">
             <button id="btn-top-provision" class="h-8 px-3.5 rounded bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0" onclick="openTopProvisionModal()">
               <span class="material-symbols-outlined text-[16px]">person_add</span>
               <span>Cấp tài khoản</span>
             </button>
-
-            <div class="text-xs text-on-surface-variant border-l border-slate-200 pl-3">
-              Hiển thị: <strong id="acc-visible-count" class="text-on-surface">100 tài khoản</strong>
-            </div>
           </div>
         </div>
 
@@ -484,6 +457,127 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <!-- ======================================================== -->
+      <!-- VIEW: GIÁM SÁT HỘI THOẠI (CHAT MONITOR - ZALO MIRRORING) -->
+      <!-- ======================================================== -->
+      <div id="view-chat-monitor" class="view-section space-y-3 hidden">
+        <!-- Top Controller / Account Switcher Bar -->
+        <div class="bg-surface-container-lowest border border-outline-variant/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <!-- Left: Account Selectors & Filters -->
+          <div class="flex flex-wrap items-center gap-2.5">
+            <div class="flex items-center gap-1.5 text-xs font-bold text-primary mr-1">
+              <span class="material-symbols-outlined text-[20px]">forum</span>
+              <span>Quan sát màn hình Zalo:</span>
+            </div>
+
+            <!-- Vùng Filter -->
+            <div class="flex items-center gap-1">
+              <label class="text-[11px] text-on-surface-variant font-medium">Vùng:</label>
+              <select id="chat-filter-region" class="text-xs py-1.5 px-2.5 rounded-lg border border-outline-variant bg-surface-container-low text-on-surface cursor-pointer focus:ring-1 focus:ring-primary" onchange="onChatFilterRegionChanged(this.value)">
+                <option value="all">Tất cả 7 Vùng</option>
+              </select>
+            </div>
+
+            <!-- Chi nhánh Filter -->
+            <div class="flex items-center gap-1">
+              <label class="text-[11px] text-on-surface-variant font-medium">Chi nhánh:</label>
+              <select id="chat-filter-branch" class="text-xs py-1.5 px-2.5 rounded-lg border border-outline-variant bg-surface-container-low text-on-surface cursor-pointer focus:ring-1 focus:ring-primary" onchange="onChatFilterBranchChanged(this.value)">
+                <option value="all">Tất cả chi nhánh</option>
+              </select>
+            </div>
+
+            <!-- Sales Selector Dropdown -->
+            <div class="flex items-center gap-1">
+              <label class="text-[11px] text-primary font-bold">Nhân viên Sales:</label>
+              <select id="chat-select-sales" class="text-xs font-semibold py-1.5 px-3 rounded-lg border-2 border-primary/40 bg-white text-on-surface cursor-pointer focus:ring-2 focus:ring-primary shadow-2xs" onchange="onChatSelectSalesChanged(this.value)">
+                <!-- Dynamically populated with active sales accounts -->
+              </select>
+            </div>
+          </div>
+
+          <!-- Right: Active Sales Profile Card (Clickable to view HR Profile) -->
+          <div id="chat-active-sales-card" class="flex items-center gap-2.5 px-3 py-1.5 bg-surface-container-low hover:bg-surface-container-high rounded-lg border border-outline-variant/60 text-xs shrink-0 cursor-pointer transition-colors group" onclick="openDrawerForActiveSales()" title="Nhấp để xem chi tiết hồ sơ HR của Sales">
+            <div class="w-7 h-7 rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center text-xs group-hover:bg-primary group-hover:text-white transition-colors">
+              <span id="chat-sales-avatar-initials">TQ</span>
+            </div>
+            <div class="flex flex-col">
+              <div class="flex items-center gap-1.5">
+                <span id="chat-sales-name" class="font-bold text-on-surface group-hover:text-primary transition-colors">Trần Minh Quân</span>
+                <span id="chat-sales-online-badge" class="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white"></span>
+                <span class="material-symbols-outlined text-[14px] text-slate-400 group-hover:text-primary">open_in_new</span>
+              </div>
+              <span id="chat-sales-meta" class="text-[10px] text-on-surface-variant">NV042 • Chi nhánh Ba Đình • ZALO-001</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Zalo Mirroring Workspace (3-Pane Desktop Container) -->
+        <div class="h-[calc(100vh-175px)] bg-white rounded-xl border border-outline-variant/60 shadow-xs flex overflow-hidden relative">
+          <!-- Dynamic Watermark Overlay (Nghị định 13/2023 DLP) -->
+          <div id="chat-dynamic-watermark" class="pointer-events-none absolute inset-0 z-20 overflow-hidden flex flex-wrap gap-24 p-12 items-center justify-around opacity-[0.035] select-none font-mono text-xs font-bold text-slate-900 rotate-[-18deg]">
+            <!-- Dynamically populated watermark stamps -->
+          </div>
+
+          <!-- Left Zalo Sidebar: Customer Conversations (320px) -->
+          <aside class="w-80 h-full border-r border-outline-variant/60 bg-surface-container-lowest flex flex-col shrink-0 z-10">
+            <!-- Search In Zalo -->
+            <div class="p-2.5 border-b border-outline-variant/60 flex items-center gap-2 bg-white">
+              <span class="material-symbols-outlined text-[18px] text-outline">search</span>
+              <input id="chat-search-customer" type="text" placeholder="Tìm kiếm tin nhắn, liên hệ..." class="w-full text-xs border-0 p-0 focus:ring-0 text-on-surface bg-transparent" oninput="filterChatConversations(this.value)">
+            </div>
+
+            <!-- Filter Tabs (Tất cả / Chưa phản hồi) -->
+            <div class="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container-low border-b border-outline-variant/40 text-[11px] font-semibold">
+              <button id="chat-tab-all" class="px-2.5 py-1 rounded bg-white text-primary border border-outline-variant/40 shadow-2xs font-bold cursor-pointer transition-all" onclick="setChatConversationFilter('all')">
+                Tất cả (<span id="chat-count-all">0</span>)
+              </button>
+              <button id="chat-tab-unread" class="px-2.5 py-1 rounded text-on-surface-variant hover:bg-white/60 cursor-pointer transition-all" onclick="setChatConversationFilter('unread')">
+                Chưa phản hồi (<span id="chat-count-unread">0</span>)
+              </button>
+            </div>
+
+            <!-- Conversation List Items -->
+            <div id="chat-conversation-list" class="flex-1 overflow-y-auto divide-y divide-outline-variant/30 select-none">
+              <!-- Dynamically populated conversations -->
+            </div>
+          </aside>
+
+          <!-- Right Zalo Chat Area: Active Conversation Feed -->
+          <section class="flex-1 h-full bg-[#f0f4f9] flex flex-col z-10 overflow-hidden">
+            <!-- Chat Header -->
+            <div class="h-14 px-4 bg-white border-b border-outline-variant/60 flex items-center justify-between shrink-0 shadow-2xs">
+              <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-full bg-blue-100 text-primary font-bold text-sm flex items-center justify-center border border-primary/20 shadow-2xs">
+                  <span id="chat-active-customer-avatar">NA</span>
+                </div>
+                <div class="flex flex-col">
+                  <h4 id="chat-active-customer-name" class="text-sm font-bold text-on-surface">Nguyễn Văn An</h4>
+                  <span id="chat-active-customer-meta" class="text-[11px] text-on-surface-variant">0912.345.678 • Hoạt động 5 phút trước</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Message Stream Feed -->
+            <div id="chat-message-feed" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3.5 relative">
+              <!-- Dynamically populated message bubbles and dividers -->
+            </div>
+
+            <!-- Clean Zalo Chat Bar (Disabled in Read-Only Mode) -->
+            <div class="p-2.5 bg-white border-t border-outline-variant/40 shrink-0">
+              <div class="flex items-center gap-2 bg-surface-container-low/70 border border-outline-variant/40 rounded-xl px-3 py-2 text-slate-400 select-none">
+                <div class="flex items-center gap-1.5 text-slate-400 text-[18px]">
+                  <span class="material-symbols-outlined text-[20px]">sentiment_satisfied</span>
+                  <span class="material-symbols-outlined text-[20px]">image</span>
+                  <span class="material-symbols-outlined text-[20px]">attach_file</span>
+                </div>
+                <input type="text" disabled placeholder="Nhập tin nhắn... (Chế độ chỉ xem)" class="w-full bg-transparent border-0 text-xs text-slate-400 placeholder-slate-400 focus:ring-0 cursor-not-allowed">
+                <span class="material-symbols-outlined text-[20px] text-slate-300">send</span>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 
@@ -675,13 +769,36 @@
         <div>Chi nhánh: <strong id="modal-handover-branch" class="text-on-surface">Chi nhánh Ba Đình</strong></div>
       </div>
 
-      <div>
-        <label class="text-xs text-slate-600 block mb-1 font-medium">Chọn nhân viên tiếp nhận mới (cùng đơn vị):</label>
-        <select id="modal-handover-employee-select" class="w-full text-xs p-2 rounded border border-outline-variant bg-white text-on-surface">
+      <!-- Searchable Combobox: Single unified employee picker for Handover (Same branch only) -->
+      <div class="relative" id="handover-combobox-wrapper">
+        <label class="text-xs font-semibold text-slate-700 block mb-1">
+          Nhân viên tiếp nhận mới (cùng đơn vị) <span class="text-red-500 font-bold">*</span>
+        </label>
+        <div class="relative">
+          <span class="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[16px]">search</span>
+          <input type="text" id="modal-handover-emp-input" 
+            placeholder="Tìm theo tên hoặc email nhân viên cùng chi nhánh..." 
+            class="w-full text-xs pl-8 pr-8 py-2 rounded-lg border border-outline-variant bg-white focus:outline-primary focus:border-primary font-medium"
+            autocomplete="off"
+            oninput="onHandoverComboboxInput(this.value)"
+            onfocus="openHandoverCombobox()">
+          <button type="button" id="modal-handover-emp-clear" class="hidden absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 cursor-pointer" onclick="clearHandoverCombobox()">
+            <span class="material-symbols-outlined text-[16px]">close</span>
+          </button>
+        </div>
+
+        <!-- Hidden inputs to hold selected employee data -->
+        <input type="hidden" id="modal-handover-selected-code" value="">
+        <input type="hidden" id="modal-handover-selected-name" value="">
+        <input type="hidden" id="modal-handover-selected-email" value="">
+        <input type="hidden" id="modal-handover-selected-dept" value="">
+
+        <!-- Dropdown popover list -->
+        <div id="modal-handover-emp-dropdown" class="hidden absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl z-50 divide-y divide-outline-variant/30">
           <!-- Dynamically populated -->
-        </select>
-        <span class="text-[11px] text-slate-400 mt-1 block">* Mã tài khoản và toàn bộ danh bạ/tin nhắn được giữ nguyên; quyền của người cũ bị thu hồi.</span>
+        </div>
       </div>
+      <span class="text-[11px] text-slate-400 mt-1 block">* Mã tài khoản và toàn bộ danh bạ/tin nhắn được giữ nguyên; quyền của người cũ bị thu hồi. Chỉ bàn giao cho nhân sự trong cùng chi nhánh.</span>
 
       <div class="pt-3 border-t border-outline-variant/60 flex items-center justify-end gap-2">
         <button class="px-3 py-1.5 rounded text-xs text-on-surface-variant hover:bg-slate-100 cursor-pointer" onclick="closeModal('modal-handover')">Hủy</button>
@@ -876,12 +993,15 @@
 
         <!-- Searchable Combobox: Single unified employee picker -->
         <div class="relative" id="provision-combobox-wrapper">
-          <label class="text-xs font-semibold text-slate-700 block mb-1">Email</label>
+          <label class="text-xs font-semibold text-slate-700 block mb-1">
+            Email / Nhân sự <span class="text-red-500 font-bold">*</span>
+          </label>
           <div class="relative">
             <span class="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[16px]">search</span>
             <input type="text" id="modal-provision-emp-input" 
               placeholder="Nhập email..." 
-              class="w-full text-xs pl-8 pr-8 py-2 rounded-lg border border-outline-variant bg-white focus:outline-primary focus:border-primary font-medium"
+              disabled
+              class="w-full text-xs pl-8 pr-8 py-2 rounded-lg border border-slate-200 bg-slate-100 text-slate-400 font-medium cursor-not-allowed focus:outline-primary focus:border-primary"
               autocomplete="off"
               oninput="onProvisionComboboxInput(this.value)"
               onfocus="openProvisionCombobox()">
@@ -902,10 +1022,12 @@
           </div>
         </div>
 
-        <!-- Display Name Field -->
+        <!-- Display Name Field (Required *) -->
         <div>
-          <label class="text-xs font-semibold text-slate-700 block mb-1">Tên hiển thị trên Zalo (Biệt danh CSKH)</label>
-          <input id="modal-provision-display-name" type="text" class="w-full text-xs p-2 rounded-lg border border-outline-variant bg-white text-on-surface font-medium focus:outline-primary focus:border-primary" placeholder="Mặc định lấy theo họ tên nhân viên">
+          <label class="text-xs font-semibold text-slate-700 block mb-1">
+            Tên hiển thị trên Zalo (Biệt danh CSKH) <span class="text-red-500 font-bold">*</span>
+          </label>
+          <input id="modal-provision-display-name" type="text" disabled class="w-full text-xs p-2 rounded-lg border border-slate-200 bg-slate-100 text-slate-400 font-medium cursor-not-allowed focus:outline-primary focus:border-primary" placeholder="Nhập tên hiển thị Zalo (bắt buộc)">
         </div>
       </div>
 
@@ -934,8 +1056,8 @@
         </button>
       </div>
 
-      <!-- Filter by Region Toolbar -->
-      <div class="flex items-center justify-between gap-3 shrink-0 bg-surface-container-low/60 p-2.5 rounded-lg border border-outline-variant/40">
+      <!-- Filter by Region Toolbar & Pool Stats -->
+      <div class="flex flex-wrap items-center justify-between gap-3 shrink-0 bg-surface-container-low/60 p-2.5 rounded-lg border border-outline-variant/40">
         <div class="flex items-center gap-2">
           <label class="text-xs font-semibold text-slate-700 whitespace-nowrap">Lọc theo Vùng:</label>
           <select id="qm-region-filter" class="text-xs py-1 px-2.5 rounded border border-outline-variant bg-white text-on-surface cursor-pointer" onchange="filterQuotaManageTable(this.value)">
@@ -949,7 +1071,16 @@
             <option value="Vùng 7 - Tây Nam Bộ">Vùng 7 - Tây Nam Bộ</option>
           </select>
         </div>
-        <span class="text-[11px] text-slate-500">* Thao tác Cấp thêm/Thu hồi có hiệu lực tức thì và bảo toàn tổng 100 quota</span>
+        <div class="flex items-center gap-2 text-xs">
+          <div class="px-2.5 py-1 bg-amber-50 border border-amber-200 rounded text-amber-800 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span>Kho trung tâm: <strong id="qm-central-available" class="font-bold font-mono">30</strong></span>
+          </div>
+          <div class="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded text-emerald-800 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>Đã phân bổ: <strong id="qm-total-allocated" class="font-bold font-mono">70</strong></span>
+          </div>
+        </div>
       </div>
 
       <!-- Scrollable Branch Quota Table -->
@@ -1040,6 +1171,28 @@
 
       <div class="pt-2 border-t border-outline-variant/60 flex items-center justify-end shrink-0">
         <button class="px-4 py-1.5 rounded text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 font-semibold cursor-pointer" onclick="closeModal('modal-ownership-history')">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 13: Phóng to Hình ảnh Chat (Image Zoom Preview Modal) -->
+  <div id="modal-chat-image-preview" class="hidden fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4" onclick="closeModal('modal-chat-image-preview')">
+    <div class="bg-surface-container-lowest rounded-2xl max-w-3xl w-full p-4 border border-outline-variant/60 shadow-2xl space-y-3 flex flex-col items-center" onclick="event.stopPropagation()">
+      <div class="w-full flex items-center justify-between border-b border-outline-variant/40 pb-2">
+        <div class="flex items-center gap-2 text-xs font-semibold text-on-surface">
+          <span class="material-symbols-outlined text-primary text-[18px]">image</span>
+          <span id="chat-preview-image-title">Modem_Wifi6_FPT_AX1800GZ.jpg</span>
+        </div>
+        <button class="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer" onclick="closeModal('modal-chat-image-preview')">
+          <span class="material-symbols-outlined text-[18px]">close</span>
+        </button>
+      </div>
+      <div class="w-full max-h-[70vh] flex items-center justify-center bg-slate-900/90 rounded-xl overflow-hidden p-2">
+        <img id="chat-preview-image-src" src="" alt="Chat Image Preview" class="max-h-[65vh] max-w-full object-contain rounded-lg shadow-lg">
+      </div>
+      <div class="w-full flex items-center justify-between text-[11px] text-slate-500 pt-1">
+        <span>Kích thước: 1920x1080 • Định dạng JPEG</span>
+        <button class="px-3 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium cursor-pointer" onclick="closeModal('modal-chat-image-preview')">Đóng</button>
       </div>
     </div>
   </div>
